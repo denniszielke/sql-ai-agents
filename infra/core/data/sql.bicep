@@ -1,11 +1,10 @@
 metadata description = 'Creates an Azure SQL Server instance.'
 param name string
-param location string = resourceGroup().location
+param location string = 'eastus2' //resourceGroup().location
 param tags object = {}
-
+param keyVaultName string
 param appUser string = 'appUser'
 param databaseName string
-param keyVaultName string
 param sqlAdmin string = 'sqlAdmin'
 param connectionStringKey string = 'AZURE-SQL-CONNECTION-STRING'
 
@@ -14,7 +13,7 @@ param sqlAdminPassword string
 @secure()
 param appUserPassword string
 
-resource sqlServer 'Microsoft.Sql/servers@2022-05-01-preview' = {
+resource sqlServer 'Microsoft.Sql/servers@2023-05-01-preview' = {
   name: name
   location: location
   tags: tags
@@ -26,11 +25,6 @@ resource sqlServer 'Microsoft.Sql/servers@2022-05-01-preview' = {
     administratorLoginPassword: sqlAdminPassword
   }
 
-  resource database 'databases' = {
-    name: databaseName
-    location: location
-  }
-
   resource firewall 'firewallRules' = {
     name: 'Azure Services'
     properties: {
@@ -40,6 +34,18 @@ resource sqlServer 'Microsoft.Sql/servers@2022-05-01-preview' = {
       startIpAddress: '0.0.0.1'
       endIpAddress: '255.255.255.254'
     }
+  }
+}
+
+resource sqlDB 'Microsoft.Sql/servers/databases@2023-05-01-preview' = {
+  parent: sqlServer
+  name: databaseName
+  location: location
+  sku: {
+    name: 'GP_S_Gen5'
+    tier: 'GeneralPurpose'
+    family: 'Gen5'
+    capacity: 1
   }
 }
 
@@ -93,6 +99,10 @@ go
 SCRIPT_END
 
 ./sqlcmd -S ${DBSERVER} -d ${DBNAME} -U ${SQLADMIN} -i ./initDb.sql
+
+wget https://raw.githubusercontent.com/microsoft/sql-server-samples/master/samples/databases/northwind-pubs/instnwnd.sql
+
+./sqlcmd -S ${DBSERVER} -d ${DBNAME} -U ${SQLADMIN} -i ./instnwnd.sql
     '''
   }
 }
@@ -125,6 +135,10 @@ resource keyVault 'Microsoft.KeyVault/vaults@2022-07-01' existing = {
   name: keyVaultName
 }
 
-var connectionString = 'Server=${sqlServer.properties.fullyQualifiedDomainName}; Database=${sqlServer::database.name}; User=${appUser}'
+var connectionString = 'Server=${sqlServer.properties.fullyQualifiedDomainName}; Database=${sqlDB.name}; User=${appUser}'
 output connectionStringKey string = connectionStringKey
-output databaseName string = sqlServer::database.name
+output databaseName string = sqlDB.name
+output serverName string = sqlServer.name
+output serverFqdn string = sqlServer.properties.fullyQualifiedDomainName
+output appUser string = appUser
+output appPassword string = appUserPassword

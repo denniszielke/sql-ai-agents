@@ -31,18 +31,18 @@ resource account 'Microsoft.CognitiveServices/accounts@2022-10-01' = {
 }
 
 // Deployments for the Azure OpenAI service
-@batchSize(1)
-resource deployment 'Microsoft.CognitiveServices/accounts/deployments@2023-05-01' = [for deployment in deployments: {
-  parent: account
-  name: deployment.name
-  sku: {
-    name: 'Standard'
-    capacity: capacity
-  }
-  properties: {
-    model: deployment.model
-  }
-}]
+// @batchSize(1)
+// resource deployment 'Microsoft.CognitiveServices/accounts/deployments@2023-05-01' = [for deployment in deployments: {
+//   parent: account
+//   name: deployment.name
+//   sku: {
+//     name: 'Standard'
+//     capacity: capacity
+//   }
+//   properties: {
+//     model: deployment.model
+//   }
+// }]
 
 output openaiEndpoint string = account.properties.endpoint
 output openaiKey string = listKeys(account.id, '2022-10-01').key1

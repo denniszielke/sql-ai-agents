@@ -8,7 +8,8 @@ param environmentName string
 @minLength(1)
 @description('Primary location for all resources')
 param location string
-
+@description('Id of the user or app to assign application roles')
+param principalId string = ''
 param resourceGroupName string = ''
 param containerAppsEnvironmentName string = ''
 param containerRegistryName string = ''
@@ -16,6 +17,16 @@ param openaiName string = ''
 param applicationInsightsDashboardName string = ''
 param applicationInsightsName string = ''
 param logAnalyticsName string = ''
+param sqlServerName string = ''
+param sqlDatabaseName string = 'northwind'
+param keyVaultName string = ''
+
+@secure()
+@description('SQL Server administrator password')
+param sqlAdminPassword string
+@secure()
+@description('Application user password')
+param appUserPassword string
 
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
@@ -67,17 +78,6 @@ module containerApps './core/host/container-apps.bicep' = {
     applicationInsightsName: monitoring.outputs.applicationInsightsName
     identityName: '${abbrs.managedIdentityUserAssignedIdentities}api-agents'
     openaiName: openai.outputs.openaiName
-    dynamcSessionsName: dynamicSessions.outputs.name
-  }
-}
-
-module dynamicSessions './core/host/dynamic-sessions.bicep' = {
-  name: 'dynamic-${resourceToken}'
-  scope: resourceGroup
-  params: {
-    name: 'sessions'
-    location: location
-    tags: tags
   }
 }
 
@@ -118,6 +118,32 @@ module monitoring './core/monitor/monitoring.bicep' = {
   }
 }
 
+module sqlServer './core/data/sql.bicep' = {
+  name: 'sql'
+  scope: resourceGroup
+  params: {
+    name: !empty(sqlServerName) ? sqlServerName : '${abbrs.sqlServers}${resourceToken}'
+    databaseName: sqlDatabaseName
+    location: location
+    tags: tags
+    sqlAdminPassword: sqlAdminPassword
+    appUserPassword: appUserPassword
+    keyVaultName: keyVault.outputs.name
+  }
+}
+
+// Store secrets in a keyvault
+module keyVault './core/security/keyvault.bicep' = {
+  name: 'keyvault'
+  scope: resourceGroup
+  params: {
+    name: !empty(keyVaultName) ? keyVaultName : '${abbrs.keyVaultVaults}${resourceToken}'
+    location: location
+    tags: tags
+    principalId: principalId
+  }
+}
+
 output AZURE_LOCATION string = location
 output AZURE_TENANT_ID string = tenant().tenantId
 output AZURE_RESOURCE_GROUP string = resourceGroup.name
@@ -136,7 +162,10 @@ output AZURE_OPENAI_COMPLETION_MODEL string = completionModelName
 output AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME string = completionDeploymentModelName
 output AZURE_OPENAI_EMBEDDING_MODEL string = embeddingModelName
 output AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME string = embeddingDeploymentModelName
-output POOL_MANAGEMENT_ENDPOINT string = dynamicSessions.outputs.poolManagementEndpoint
 output AZURE_AI_SEARCH_NAME string = search.outputs.searchName
 output AZURE_AI_SEARCH_ENDPOINT string = search.outputs.searchEndpoint
 output AZURE_AI_SEARCH_KEY string = search.outputs.searchAdminKey
+output AZURE_SQL_SERVER_NAME string = sqlServer.outputs.serverName
+output AZURE_SQL_APP_PASSWORD string = sqlServer.outputs.appPassword
+output AZURE_SQL_APP_USER string = sqlServer.outputs.appUser
+output AZURE_SQL_DATABASE_NAME string = sqlServer.outputs.databaseName

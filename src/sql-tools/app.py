@@ -101,7 +101,7 @@ df = pd.read_csv(
     "https://raw.githubusercontent.com/pandas-dev/pandas/main/doc/data/titanic.csv"
 )
 
-agent = create_pandas_dataframe_agent(
+agent_executor = create_pandas_dataframe_agent(
     llm,
     df,
     verbose=True,
@@ -117,7 +117,7 @@ if prompt := st.chat_input():
 
     with st.chat_message("assistant"):
         st_callback = StreamlitCallbackHandler(st.container())
-        response = agent.invoke(
+        response = agent_executor.invoke(
             {"input": prompt}, {"callbacks": [st_callback]}
         )
         st.write(response["output"])
