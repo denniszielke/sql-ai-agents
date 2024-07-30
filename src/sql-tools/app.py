@@ -36,8 +36,8 @@ instrumentor = LangchainInstrumentor()
 if not instrumentor.is_instrumented_by_opentelemetry:
     instrumentor.instrument()
 
-st.title("💬 AI bot that can use tools")
-st.caption("🚀 A Bot that can use tools to answer questions about time and space")
+st.title("💬 AI bot that talk to a database")
+st.caption("🚀 A Bot that can use tools to answer questions about relational data")
 
 def get_session_id() -> str:
     id = random.randint(0, 1000000)
@@ -73,73 +73,6 @@ else:
 df = pd.read_csv(
     "https://raw.githubusercontent.com/pandas-dev/pandas/main/doc/data/titanic.csv"
 )
-
-llm.with_config({"run_name": "ChatPromptTemplate.langchain.task", "run_id": st.session_state["session_id"], "configurable": {"cat": "peter"}, "tags": ["my_template"], "metadata": {"category": "jokes"}})
-
-@tool
-def get_current_location(input: str) -> str:
-    "Get the current timezone location of the user."
-    return "Europe/Berlin"
-
-@tool
-def get_current_time(location: str) -> str:
-    "Get the current time in the given location. The pytz is used to get the timezone for that location. Location names should be in a format like America/New_York, Asia/Bangkok, Europe/London. Anything in Germany should be Europe/Berlin"
-    try:
-        print("get current time for location: ", location)
-        location = str.replace(location, " ", "")
-        location = str.replace(location, "\"", "")
-        location = str.replace(location, "\n", "")
-        # Get the timezone for the city
-        timezone = pytz.timezone(location)
-
-        # Get the current time in the timezone
-        now = datetime.now(timezone)
-        current_time = now.strftime("%I:%M:%S %p")
-
-        return current_time
-    except Exception as e:
-        print("Error: ", e)
-        return "Sorry, I couldn't find the timezone for that location."
-    
-tools = []
-
-commandprompt = '''
-    ##
-    You are a helpfull assistent and should respond to user questions.
-    If you cannot answer a question then say so explicitly and stop.
-    
-    '''
-
-promptString = commandprompt +  """Answer the following questions as best you can. You have access to the following tools:
-
-{tools}
-
-Use the following format:
-
-Question: the input question you must answer
-
-Thought: you should always think about what to do
-
-Action: the action to take, should be one of [{tool_names}]. Make sure that Actions are not commands. They should be the name of the tool to use.
-
-Action Input: the input to the action according to the tool signature
-
-Observation: the result of the action
-
-... (this Thought/Action/Action Input/Observation can repeat N times)
-
-Thought: I now know the final answer
-
-Final Answer: the final answer to the original input question
-
-Begin!
-
-Question: {input}
-
-Thought:{agent_scratchpad}
-
-"""
-prompt = PromptTemplate.from_template(promptString)
 
 agent = create_pandas_dataframe_agent(
     llm,
