@@ -107,7 +107,8 @@ agent = create_pandas_dataframe_agent(
     verbose=True,
     agent_type=AgentType.OPENAI_FUNCTIONS, 
     allow_dangerous_code=True,
-    extra_tools=tools
+    handle_parsing_errors=True,
+    # extra_tools=tools
 )
 
 if prompt := st.chat_input():
