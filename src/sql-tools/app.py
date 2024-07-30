@@ -69,7 +69,34 @@ else:
         openai_api_type="azure_ad",
         streaming=True
     )
-    
+
+@tool
+def get_current_location(input: str) -> str:
+    "Get the current timezone location of the user."
+    return "Europe/Berlin"
+
+@tool
+def get_current_time(location: str) -> str:
+    "Get the current time in the given location. The pytz is used to get the timezone for that location. Location names should be in a format like America/New_York, Asia/Bangkok, Europe/London. Anything in Germany should be Europe/Berlin"
+    try:
+        print("get current time for location: ", location)
+        location = str.replace(location, " ", "")
+        location = str.replace(location, "\"", "")
+        location = str.replace(location, "\n", "")
+        # Get the timezone for the city
+        timezone = pytz.timezone(location)
+
+        # Get the current time in the timezone
+        now = datetime.now(timezone)
+        current_time = now.strftime("%I:%M:%S %p")
+
+        return current_time
+    except Exception as e:
+        print("Error: ", e)
+        return "Sorry, I couldn't find the timezone for that location."
+
+tools = [get_current_location, get_current_time]
+
 df = pd.read_csv(
     "https://raw.githubusercontent.com/pandas-dev/pandas/main/doc/data/titanic.csv"
 )
@@ -78,7 +105,9 @@ agent = create_pandas_dataframe_agent(
     llm,
     df,
     verbose=True,
-    agent_type=AgentType.OPENAI_FUNCTIONS, allow_dangerous_code=True
+    agent_type=AgentType.OPENAI_FUNCTIONS, 
+    allow_dangerous_code=True,
+    extra_tools=tools
 )
 
 if prompt := st.chat_input():
