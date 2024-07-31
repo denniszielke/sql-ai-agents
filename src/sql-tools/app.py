@@ -16,6 +16,7 @@ from langchain_community.agent_toolkits.load_tools import load_tools
 from langchain_community.callbacks.streamlit import (
     StreamlitCallbackHandler,
 )
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from langchain.prompts.chat import ChatPromptTemplate
 from langchain.agents import LLMSingleActionAgent, AgentOutputParser
 from langchain.chains import LLMChain
@@ -47,6 +48,23 @@ if "session_id" not in st.session_state:
     st.session_state["session_id"] = get_session_id()
     print("started new session: " + st.session_state["session_id"])
     st.write("You are running in session: " + st.session_state["session_id"])
+
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+for message in st.session_state.chat_history:
+    if isinstance(message, HumanMessage):
+        with st.chat_message("Human"):
+            st.markdown(message.content)
+    elif isinstance(message, AIMessage):
+        with st.chat_message("AI"):
+            st.markdown(message.content)
+    elif isinstance(message, ToolMessage):
+        with st.chat_message("Tool"):
+            st.markdown(message.content)
+    else:
+        with st.chat_message("Agent"):
+            st.markdown(message.content)
 
 llm: AzureChatOpenAI = None
 if "AZURE_OPENAI_API_KEY" in os.environ:
@@ -97,27 +115,66 @@ def get_current_time(location: str) -> str:
 
 tools = [get_current_location, get_current_time]
 
-df = pd.read_csv(
-    "https://raw.githubusercontent.com/pandas-dev/pandas/main/doc/data/titanic.csv"
+driver = '{ODBC Driver 18 for SQL Server}'
+odbc_str = 'mssql+pyodbc:///?odbc_connect=' \
+                'Driver='+driver+ \
+                ';' + os.getenv("AZURE_SQL_CONNECTIONSTRING")
+
+from langchain_community.utilities import SQLDatabase
+
+db = SQLDatabase.from_uri(odbc_str)
+print(db.dialect)
+print(db.get_usable_table_names())
+# db.run("select * from [dbo].[Categories]")
+
+from langchain.chains import create_sql_query_chain
+
+from langchain_community.tools.sql_database.tool import QuerySQLDataBaseTool
+
+execute_query = QuerySQLDataBaseTool(db=db)
+write_query = create_sql_query_chain(llm, db)
+chain = write_query | execute_query
+
+from operator import itemgetter
+
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import PromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+
+answer_prompt = PromptTemplate.from_template(
+    """Given the following user question, corresponding SQL query, and SQL result, answer the user question.
+
+Question: {question}
+SQL Query: {query}
+SQL Result: {result}
+Answer: """
 )
 
-agent_executor = create_pandas_dataframe_agent(
-    llm,
-    df,
-    verbose=True,
-    agent_type=AgentType.OPENAI_FUNCTIONS, 
-    allow_dangerous_code=True,
-    handle_parsing_errors=True,
-    # extra_tools=tools
+chain = (
+    RunnablePassthrough.assign(query=write_query).assign(
+        result=itemgetter("query") | execute_query
+    )
+    | answer_prompt
+    | llm
+    | StrOutputParser()
 )
 
-if prompt := st.chat_input():
+human_query = st.chat_input()
 
-    st.chat_message("user").write(prompt)
+if human_query is not None and human_query != "":
 
-    with st.chat_message("assistant"):
-        st_callback = StreamlitCallbackHandler(st.container())
-        response = agent_executor.invoke(
-            {"input": prompt}, {"callbacks": [st_callback]}
-        )
-        st.write(response["output"])
+    st.session_state.chat_history.append(HumanMessage(human_query))
+
+    with st.chat_message("Human"):
+        st.markdown(human_query)
+
+    with st.chat_message("Agent"):
+        # st_callback = StreamlitCallbackHandler(st.container())
+        response = chain.invoke({"question": human_query})
+        # response = agent_executor.invoke(
+        #     {"input": prompt}, {"callbacks": [st_callback]}
+        # )
+
+        print(chain.get_prompts()[0].pretty_print())
+
+        st.write(response)

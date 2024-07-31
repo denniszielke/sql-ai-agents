@@ -169,3 +169,4 @@ output AZURE_SQL_SERVER_NAME string = sqlServer.outputs.serverName
 output AZURE_SQL_APP_PASSWORD string = sqlServer.outputs.appPassword
 output AZURE_SQL_APP_USER string = sqlServer.outputs.appUser
 output AZURE_SQL_DATABASE_NAME string = sqlServer.outputs.databaseName
+output AZURE_SQL_CONNECTIONSTRING string = sqlServer.outputs.connectionStringKey
