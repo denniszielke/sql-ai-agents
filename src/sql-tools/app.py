@@ -4,22 +4,13 @@ import pandas as pd
 from io import StringIO
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 import streamlit as st
-from langchain import agents
 from langchain_core.prompts import PromptTemplate
 from langchain_core.tools import tool
 from langchain_openai import AzureChatOpenAI
-from langchain.agents import AgentExecutor, create_react_agent
-from langchain.agents.agent_types import AgentType
-from langchain_experimental.agents.agent_toolkits import create_pandas_dataframe_agent
-from langchain.agents.agent import RunnableAgent
-from langchain_community.agent_toolkits.load_tools import load_tools
 from langchain_community.callbacks.streamlit import (
     StreamlitCallbackHandler,
 )
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-from langchain.prompts.chat import ChatPromptTemplate
-from langchain.agents import LLMSingleActionAgent, AgentOutputParser
-from langchain.chains import LLMChain
 from promptflow.tracing import start_trace
 import random
 import json
@@ -130,6 +121,14 @@ print(db.get_usable_table_names())
 from langchain.chains import create_sql_query_chain
 
 from langchain_community.tools.sql_database.tool import QuerySQLDataBaseTool
+from langchain_core.runnables import chain
+
+@chain
+def query_inspector(text):
+    text = str.replace(text, "```sql", "")
+    text = str.replace(text, "```", "")
+    print("Query inspector: ", text)
+    return text
 
 execute_query = QuerySQLDataBaseTool(db=db)
 write_query = create_sql_query_chain(llm, db)
@@ -152,7 +151,7 @@ Answer: """
 
 chain = (
     RunnablePassthrough.assign(query=write_query).assign(
-        result=itemgetter("query") | execute_query
+        result=itemgetter("query") | query_inspector | execute_query
     )
     | answer_prompt
     | llm
@@ -171,10 +170,9 @@ if human_query is not None and human_query != "":
     with st.chat_message("Agent"):
         # st_callback = StreamlitCallbackHandler(st.container())
         response = chain.invoke({"question": human_query})
-        # response = agent_executor.invoke(
-        #     {"input": prompt}, {"callbacks": [st_callback]}
+        # response = chain.invoke(
+        #     {"question": human_query}, {"callbacks": [st_callback]}
         # )
-
         print(chain.get_prompts()[0].pretty_print())
 
         st.write(response)
