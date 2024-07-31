@@ -1,21 +1,14 @@
 import os
 import dotenv
 import pandas as pd
-from io import StringIO
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 import streamlit as st
 from langchain_core.prompts import PromptTemplate
-from langchain_core.tools import tool
 from langchain_openai import AzureChatOpenAI
-from langchain_community.callbacks.streamlit import (
-    StreamlitCallbackHandler,
-)
+
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from promptflow.tracing import start_trace
 import random
-import json
-import pytz
-from datetime import datetime
 
 dotenv.load_dotenv()
 # start a trace session, and print a url for user to check trace
@@ -79,33 +72,6 @@ else:
         streaming=True
     )
 
-@tool
-def get_current_location(input: str) -> str:
-    "Get the current timezone location of the user."
-    return "Europe/Berlin"
-
-@tool
-def get_current_time(location: str) -> str:
-    "Get the current time in the given location. The pytz is used to get the timezone for that location. Location names should be in a format like America/New_York, Asia/Bangkok, Europe/London. Anything in Germany should be Europe/Berlin"
-    try:
-        print("get current time for location: ", location)
-        location = str.replace(location, " ", "")
-        location = str.replace(location, "\"", "")
-        location = str.replace(location, "\n", "")
-        # Get the timezone for the city
-        timezone = pytz.timezone(location)
-
-        # Get the current time in the timezone
-        now = datetime.now(timezone)
-        current_time = now.strftime("%I:%M:%S %p")
-
-        return current_time
-    except Exception as e:
-        print("Error: ", e)
-        return "Sorry, I couldn't find the timezone for that location."
-
-tools = [get_current_location, get_current_time]
-
 driver = '{ODBC Driver 18 for SQL Server}'
 odbc_str = 'mssql+pyodbc:///?odbc_connect=' \
                 'Driver='+driver+ \
@@ -123,11 +89,14 @@ from langchain.chains import create_sql_query_chain
 from langchain_community.tools.sql_database.tool import QuerySQLDataBaseTool
 from langchain_core.runnables import chain
 
+generatedSQLquery = ''
+
 @chain
 def query_inspector(text):
     text = str.replace(text, "```sql", "")
     text = str.replace(text, "```", "")
     print("Query inspector: ", text)
+    generatedSQLquery = text
     return text
 
 execute_query = QuerySQLDataBaseTool(db=db)
@@ -141,7 +110,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 
 answer_prompt = PromptTemplate.from_template(
-    """Given the following user question, corresponding SQL query, and SQL result, answer the user question.
+    """Given the following user question, corresponding SQL query, and SQL result, answer the user question. Please provide a clear and concise answer, output the SQL query and explain shortly the essential part of the SQL query that was used to generate the result.
 
 Question: {question}
 SQL Query: {query}
@@ -168,11 +137,7 @@ if human_query is not None and human_query != "":
         st.markdown(human_query)
 
     with st.chat_message("Agent"):
-        # st_callback = StreamlitCallbackHandler(st.container())
         response = chain.invoke({"question": human_query})
-        # response = chain.invoke(
-        #     {"question": human_query}, {"callbacks": [st_callback]}
-        # )
+        print(response)
         print(chain.get_prompts()[0].pretty_print())
-
         st.write(response)
