@@ -6,7 +6,7 @@ tiktoken==0.7.0
 azure-search-documents==11.5.0
 azure-identity==1.17.1
 uvicorn==0.30.3
-streamlit==1.36.0
+streamlit==1.37.0
 promptflow==1.13.0
 promptflow-core==1.13.0
 langchain-community==0.2.9
@@ -21,3 +21,4 @@ langchainhub==0.1.20
 langchain_experimental==0.0.63
 langchain_community==0.2.9
 sqlalchemy==2.0.31
+pyodbc==5.1.0
