@@ -8,6 +8,8 @@ param environmentName string
 @minLength(1)
 @description('Primary location for all resources')
 param location string
+@description('Location for OpenAI resources (if empty uses primary location)')
+param aiResourceLocation string
 @description('Id of the user or app to assign application roles')
 param principalId string = ''
 param resourceGroupName string = ''
@@ -32,13 +34,14 @@ var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = { 'azd-env-name': environmentName, 'app': 'ai-agents', 'tracing': 'yes' }
 
-param completionDeploymentModelName string = 'gpt-35-turbo'
-param completionModelName string = 'gpt-35-turbo'
-param completionModelVersion string = '0613'
-param embeddingDeploymentModelName string = 'text-embedding-3-small'
-param embeddingModelName string = 'text-embedding-3-small'
+param completionDeploymentModelName string = 'gpt-4o'
+param completionModelName string = 'gpt-4o'
+param completionModelVersion string = '2024-05-13'
+param embeddingDeploymentModelName string = 'text-embedding-ada-002'
+param embeddingModelName string = 'text-embedding-ada-002'
 param openaiApiVersion string = '2024-02-01'
-param openaiCapacity int = 200
+param embeddingModelVersion string = '2'
+param openaiCapacity int = 50
 param modelDeployments array = [
   {
     name: completionDeploymentModelName
@@ -53,7 +56,7 @@ param modelDeployments array = [
     model: {
       format: 'OpenAI'
       name: embeddingModelName
-      version: '1'
+      version: embeddingModelVersion
     }
   }
 ]
@@ -86,7 +89,7 @@ module openai './ai/openai.bicep' = {
   name: 'openai'
   scope: resourceGroup
   params: {
-    location: location
+    location: !empty(aiResourceLocation) ? aiResourceLocation : location
     tags: tags
     customDomainName: !empty(openaiName) ? openaiName : '${abbrs.cognitiveServicesAccounts}${resourceToken}'
     name: !empty(openaiName) ? openaiName : '${abbrs.cognitiveServicesAccounts}${resourceToken}'
@@ -145,9 +148,9 @@ module keyVault './core/security/keyvault.bicep' = {
 }
 
 output AZURE_LOCATION string = location
+output AZURE_AI_SERVICE_LOCATION string = openai.outputs.location
 output AZURE_TENANT_ID string = tenant().tenantId
 output AZURE_RESOURCE_GROUP string = resourceGroup.name
-
 output APPLICATIONINSIGHTS_CONNECTION_STRING string = monitoring.outputs.applicationInsightsConnectionString
 output APPLICATIONINSIGHTS_NAME string = monitoring.outputs.applicationInsightsName
 output AZURE_CONTAINER_ENVIRONMENT_NAME string = containerApps.outputs.environmentName
@@ -166,7 +169,6 @@ output AZURE_AI_SEARCH_NAME string = search.outputs.searchName
 output AZURE_AI_SEARCH_ENDPOINT string = search.outputs.searchEndpoint
 output AZURE_AI_SEARCH_KEY string = search.outputs.searchAdminKey
 output AZURE_SQL_SERVER_NAME string = sqlServer.outputs.serverName
-output AZURE_SQL_APP_PASSWORD string = sqlServer.outputs.appPassword
 output AZURE_SQL_APP_USER string = sqlServer.outputs.appUser
 output AZURE_SQL_DATABASE_NAME string = sqlServer.outputs.databaseName
-output AZURE_SQL_CONNECTIONSTRING string = sqlServer.outputs.connectionStringKey
+output AZURE_SQL_CONNECTIONSTRING string = sqlServer.outputs.connectionString
