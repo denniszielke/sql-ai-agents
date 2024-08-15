@@ -79,7 +79,6 @@ else:
         azure_ad_token_provider = token_provider
     )
 
-
 def get_session_id() -> str:
     id = random.randint(0, 1000000)
     return "00000000-0000-0000-0000-" + str(id).zfill(12)
@@ -148,7 +147,7 @@ from langchain_core.tools import tool
 @tool
 def db_query_tool(query: str) -> str:
     """
-    Execute a SQL query against the database and get back the result.
+    Execute a SQL Server query against the database and get back the result.
     If the query is not correct, an error message will be returned.
     If an error is returned, rewrite the query, check the query, and try again.
     """
@@ -163,7 +162,7 @@ print(db_query_tool.invoke("SELECT TOP 3 * FROM Orders"))
 from langchain_core.prompts import ChatPromptTemplate
 
 query_check_system = """You are a SQL expert with a strong attention to detail.
-Double check the SQLite query for common mistakes, including:
+Double check the SQL Server query for common mistakes, including:
 - Using NOT IN with NULL values
 - Using UNION when UNION ALL should have been used
 - Using BETWEEN for exclusive ranges
@@ -172,6 +171,7 @@ Double check the SQLite query for common mistakes, including:
 - Using the correct number of arguments for functions
 - Casting to the correct data type
 - Using the proper columns for joins
+- Not using any create or drop statements
 
 If there are any of the above mistakes, rewrite the query. If there are no mistakes, just reproduce the original query.
 
@@ -267,7 +267,7 @@ class SubmitFinalAnswer(BaseModel):
 # Add a node for a model to generate a query based on the question and schema
 query_gen_system = """You are a SQL expert with a strong attention to detail.
 
-Given an input question, output a syntactically correct SQLite query to run, then look at the results of the query and return the answer.
+Given an input question, output a syntactically correct SQL Server query to run, then look at the results of the query and return the answer.
 
 DO NOT call any tool besides SubmitFinalAnswer to submit the final answer.
 
@@ -324,7 +324,7 @@ workflow.add_node("execute_query", create_tool_node_with_fallback([db_query_tool
 
 
 # Define a conditional edge to decide whether to continue or end the workflow
-def should_continue(state: State) -> Literal[END, "correct_query", "query_gen"]:
+def should_continue(state: State) -> Literal["correct_query", "query_gen", "__end__"]:
     messages = state["messages"]
     last_message = messages[-1]
     # If there is a tool call, then we finish
