@@ -267,7 +267,7 @@ class SubmitFinalAnswer(BaseModel):
 # Add a node for a model to generate a query based on the question and schema
 query_gen_system = """You are a SQL expert with a strong attention to detail.
 
-Given an input question, output a syntactically correct SQLite query to run, then look at the results of the query and return the answer.
+Given an input question, output a syntactically correct SQL Server query to run, then look at the results of the query and return the answer.
 
 DO NOT call any tool besides SubmitFinalAnswer to submit the final answer.
 
