@@ -1,0 +1,12 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "SQL-Agents:Python:Streamlit",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "streamlit",
+      "args": ["run", "./src/sql-agents/app.py", "--server.port", "8000"]
+    }
+  ]
+}
