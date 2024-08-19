@@ -259,22 +259,7 @@ query_gen_prompt = ChatPromptTemplate.from_messages(
 query_gen = query_gen_prompt | llm
 
 def query_gen_node(state: State):
-    message = query_gen.invoke(state)
-
-    # Sometimes, the LLM will hallucinate and call the wrong tool. We need to catch this and return an error message.
-    tool_messages = []
-    if message.tool_calls:
-        for tc in message.tool_calls:
-            if tc["name"] != "SubmitFinalAnswer":
-                tool_messages.append(
-                    ToolMessage(
-                        content=f"Error: The wrong tool was called: {tc['name']}. Please fix your mistakes. Remember to only call SubmitFinalAnswer to submit the final answer. Generated queries should be outputted WITHOUT a tool call.",
-                        tool_call_id=tc["id"],
-                    )
-                )
-    else:
-        tool_messages = []
-    return {"messages": [message] + tool_messages}
+    return {"messages": [query_gen.invoke(state)]}
 
 
 workflow.add_node("query_gen", query_gen_node)
@@ -330,24 +315,25 @@ if human_query is not None and human_query != "":
         print ("message: ")
         for value in event.values():
             print(value)
-            if ( isinstance(value["messages"][-1], AIMessage) ):
-                print("AI:", value["messages"][-1].content)
-                # with st.chat_message("Agent"):
-                #     if (value["messages"][-1].content == ''):
-                #         toolusage = ''
-                #         for tool in value["messages"][-1].additional_kwargs["tool_calls"]:
-                #             print(tool)
-                #             toolusage += "id:" + str(tool["index"]) + "  \n name: " + tool["function"]["name"] + "  \n arguments: " + tool["function"]["arguments"] + "  \n\n"
-                #         st.write("Using the folllwing tools: \n", toolusage)
-                #     else:
-                #         st.write(value["messages"][-1].content)
+            message = value["messages"][-1]
+            if ( isinstance(message, AIMessage) ):
+                print("AI:", message.content)
+                with st.chat_message("Agent"):
+                     if (message.content == ''):
+                         toolusage = ''
+                         for tool in message.tool_calls:
+                             print(tool)
+                             toolusage += "name: " + tool["name"] + "  \n\n"
+                         st.write("Using the folllwing tools: \n", toolusage)
+                     else:
+                         st.write(message.content)
             
-            if ( isinstance(value["messages"][-1], ToolMessage) ):
-                print("Tool:", value["messages"][-1].content)
+            if ( isinstance(message, ToolMessage) ):
+                print("Tool:", message.content)
                 with st.chat_message("Tool"):
-                    st.write(value["messages"][-1].content.replace('\n\n', ''))
+                    st.write(message.content.replace('\n\n', ''))
             
-            if ( isinstance(value["messages"][-1], str) ):
-                print("Agent:", value["messages"][-1])
+            if ( isinstance(message, str) ):
+                print("Agent:", message)
                 with st.chat_message("AI"):
-                    st.write(value["messages"][-1])
+                    st.write(message)
