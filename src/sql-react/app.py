@@ -21,7 +21,11 @@ instrumentor = LangchainInstrumentor()
 if not instrumentor.is_instrumented_by_opentelemetry:
     instrumentor.instrument()
 
-st.title("💬 AI react bot that talk to a database")
+st.set_page_config(
+    page_title="AI reactive bot that can interact with a database"
+)
+
+st.title("💬 AI reactive database query bot")
 st.caption("🚀 A Bot that can use iterative tools to answer questions about relational data")
 
 def get_session_id() -> str:
@@ -245,7 +249,7 @@ if human_query is not None and human_query != "":
     with st.chat_message("assistant"):
         st_callback = StreamlitCallbackHandler(st.container())
         response = agent_executor.invoke(
-            {"input": human_query, "chat_history": st.session_state.chat_history, "table_names": db.get_table_info()}, {"callbacks": [st_callback]}, 
+            {"input": human_query, "chat_history": st.session_state.chat_history, "table_names": db.get_usable_table_names()}, {"callbacks": [st_callback]}, 
         )
 
         ai_response = st.write(response["output"])

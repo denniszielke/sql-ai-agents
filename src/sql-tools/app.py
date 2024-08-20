@@ -22,7 +22,7 @@ if not instrumentor.is_instrumented_by_opentelemetry:
     instrumentor.instrument()
 
 st.set_page_config(
-    page_title="AI bot that can a database as tools"
+    page_title="AI bot that can use a database as tools"
 )
 
 st.title("💬 AI bot that talk to a database")
