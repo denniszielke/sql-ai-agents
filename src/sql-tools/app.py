@@ -21,6 +21,10 @@ instrumentor = LangchainInstrumentor()
 if not instrumentor.is_instrumented_by_opentelemetry:
     instrumentor.instrument()
 
+st.set_page_config(
+    page_title="AI bot that can a database as tools"
+)
+
 st.title("💬 AI bot that talk to a database")
 st.caption("🚀 A Bot that can use tools to answer questions about relational data")
 
@@ -112,6 +116,8 @@ from langchain_core.runnables import RunnablePassthrough
 answer_prompt = PromptTemplate.from_template(
     """Given the following user question, corresponding SQL query, and SQL result, answer the user question. Please provide a clear and concise answer, output the SQL query and explain shortly the essential part of the SQL query that was used to generate the result.
 
+DO NOT make any changing statements to the database by using CREATE, INSERT, UPDATE, DELETE, DROP etc.
+    
 Question: {question}
 SQL Query: {query}
 SQL Result: {result}
