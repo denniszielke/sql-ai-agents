@@ -241,6 +241,8 @@ workflow.add_node(
     },
 )
 
+#-----------------------------------------------------------------------------------------------
+
 # Add a node for a model to generate a query based on the question and schema
 query_gen_system = """You are a SQL expert with a strong attention to detail.
 
@@ -266,20 +268,41 @@ def query_gen_node(state: State):
 
 workflow.add_node("query_gen", query_gen_node)
 
+#-----------------------------------------------------------------------------------------------
+
 # Add a node for the model to check the query before executing it
 workflow.add_node("correct_query", model_check_query)
 
 # Add node for executing the query
 workflow.add_node("execute_query", create_tool_node_with_fallback([db_query_tool]))
 
+#-----------------------------------------------------------------------------------------------
+
+format_system = """
+You receive an unformatted input message and need to format it into a human readable, meaningful response.
+---
+{input}
+"""
+format_prompt = ChatPromptTemplate.from_messages(
+    [("system", format_system), ("placeholder", "{input}")]
+)
+format_gen = format_prompt | llm
+
+def format_gen_node(state: State):
+    return {"messages": [format_gen.invoke({"input": [state["messages"][-1].content]})]}
+
+workflow.add_node("format_gen", format_gen_node)
+
+#-----------------------------------------------------------------------------------------------
+
 # Define a conditional edge to decide whether to continue or end the workflow
-def should_continue(state: State) -> Literal["__end__", "query_gen"]:
+def should_continue(state: State) -> Literal["format_gen", "query_gen"]:
     messages = state["messages"]
     last_message = messages[-1]
     if last_message.content.startswith("Error:"):
         return "query_gen"
     else:
-        return END
+        return "format_gen"
 
 
 # Specify the edges between the nodes
@@ -294,6 +317,7 @@ workflow.add_conditional_edges(
     "execute_query",
     should_continue,
 )
+workflow.add_edge("format_gen", END)
 
 # Compile the workflow into a runnable
 app = workflow.compile()
