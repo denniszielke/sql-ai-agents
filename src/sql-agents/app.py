@@ -39,6 +39,8 @@ from langchain_community.utilities import SQLDatabase
 from langchain_community.agent_toolkits import SQLDatabaseToolkit
 from langchain_core.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
+from IPython.display import Image
+from langchain_core.runnables.graph import CurveStyle, MermaidDrawMethod, NodeStyles
 
 dotenv.load_dotenv()
 # start a trace session, and print a url for user to check trace
@@ -311,8 +313,7 @@ if human_query is not None and human_query != "":
     with st.chat_message("Human"):
         st.markdown(human_query)
 
-    for event in app.stream(inputs):       
-        print ("message: ")
+    for event in app.stream(inputs):  
         for value in event.values():
             print(value)
             message = value["messages"][-1]
@@ -324,7 +325,7 @@ if human_query is not None and human_query != "":
                          for tool in message.tool_calls:
                              print(tool)
                              toolusage += "name: " + tool["name"] + "  \n\n"
-                         st.write("Using the folllwing tools: \n", toolusage)
+                         st.write("Using the following tools: \n", toolusage)
                      else:
                          st.write(message.content)
             
@@ -337,3 +338,11 @@ if human_query is not None and human_query != "":
                 print("Agent:", message)
                 with st.chat_message("AI"):
                     st.write(message)
+
+    with st.chat_message("Agent"):
+        st.write("The conversation has ended. Those were the steps taken to answer your query.")
+        st.image(
+            app.get_graph(xray=True).draw_mermaid_png(
+                draw_method=MermaidDrawMethod.API,
+            )
+        )
