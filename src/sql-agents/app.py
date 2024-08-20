@@ -333,11 +333,6 @@ if human_query is not None and human_query != "":
                 print("Tool:", message.content)
                 with st.chat_message("Tool"):
                     st.write(message.content.replace('\n\n', ''))
-            
-            if ( isinstance(message, str) ):
-                print("Agent:", message)
-                with st.chat_message("AI"):
-                    st.write(message)
 
     with st.chat_message("Agent"):
         st.write("The conversation has ended. Those were the steps taken to answer your query.")
