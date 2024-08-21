@@ -1,22 +1,14 @@
 import os
-import json
 import dotenv
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 import streamlit as st
-import getpass
 import random
 from langchain_openai import AzureChatOpenAI
 from langchain_openai import AzureOpenAIEmbeddings
-from langchain_community.callbacks.streamlit import (
-    StreamlitCallbackHandler,
-)
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-from promptflow.tracing import start_trace
-from bs4 import BeautifulSoup
 
-from typing import Annotated, Sequence, TypedDict
+from typing import Annotated, TypedDict
 
-from langchain_core.messages import BaseMessage
 
 from langgraph.graph.message import add_messages
 
@@ -24,7 +16,6 @@ from typing import Annotated, Literal
 
 from langchain_core.messages import AIMessage
 from langchain_core.pydantic_v1 import BaseModel, Field
-from langchain_openai import ChatOpenAI
 from typing_extensions import TypedDict
 
 from langgraph.graph import END, StateGraph, START
@@ -43,14 +34,19 @@ from IPython.display import Image
 from langchain_core.runnables.graph import CurveStyle, MermaidDrawMethod, NodeStyles
 
 dotenv.load_dotenv()
-# start a trace session, and print a url for user to check trace
-start_trace()
+
+from opentelemetry import trace
+tracer = trace.get_tracer(__name__)
 
 # enable langchain instrumentation
 from opentelemetry.instrumentation.langchain import LangchainInstrumentor
 instrumentor = LangchainInstrumentor()
 if not instrumentor.is_instrumented_by_opentelemetry:
     instrumentor.instrument()
+
+st.set_page_config(
+    page_title="AI agentic bot that can interact with a database"
+)
 
 st.title("💬 AI agentic RAG")
 st.caption("🚀 A Bot that can use an agent to retrieve, augment, generate, validate and iterate")
@@ -341,26 +337,30 @@ if human_query is not None and human_query != "":
     with st.chat_message("Human"):
         st.markdown(human_query)
 
-    for event in app.stream(inputs):  
-        for value in event.values():
-            print(value)
-            message = value["messages"][-1]
-            if ( isinstance(message, AIMessage) ):
-                print("AI:", message.content)
-                with st.chat_message("Agent"):
-                     if (message.content == ''):
-                         toolusage = ''
-                         for tool in message.tool_calls:
-                             print(tool)
-                             toolusage += "name: " + tool["name"] + "  \n\n"
-                         st.write("Using the following tools: \n", toolusage)
-                     else:
-                         st.write(message.content)
-            
-            if ( isinstance(message, ToolMessage) ):
-                print("Tool:", message.content)
-                with st.chat_message("Tool"):
-                    st.write(message.content.replace('\n\n', ''))
+    with tracer.start_as_current_span("agent-chain") as span:
+        for event in app.stream(inputs):  
+            for value in event.values():
+                print(value)
+                message = value["messages"][-1]
+                if ( isinstance(message, AIMessage) ):
+                    print("AI:", message.content)
+                    with st.chat_message("Agent"):
+                        if (message.content == ''):
+                            toolusage = ''
+                            for tool in message.tool_calls:
+                                print(tool)
+                                toolusage += "name: " + tool["name"] + "  \n\n"
+                            st.write("Using the following tools: \n", toolusage)
+                        else:
+                            st.write(message.content)
+                
+                if ( isinstance(message, ToolMessage) ):
+                    print("Tool:", message.content)
+                    with st.chat_message("Tool"):
+                        st.write(message.content.replace('\n\n', ''))
+        span.set_attribute("llm.usage.completion_tokens",5) 
+        span.set_attribute("llm.usage.prompt_tokens", 100) 
+        span.set_attribute("llm.usage.total_tokens", 150) 
 
     with st.chat_message("Agent"):
         st.write("The conversation has ended. Those were the steps taken to answer your query.")

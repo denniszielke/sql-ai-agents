@@ -7,12 +7,12 @@ from langchain_core.prompts import PromptTemplate
 from langchain_openai import AzureChatOpenAI
 
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-from promptflow.tracing import start_trace
+# from promptflow.tracing import start_trace
 import random
 
 dotenv.load_dotenv()
 # start a trace session, and print a url for user to check trace
-start_trace()
+# start_trace()
 
 # enable langchain instrumentation
 from opentelemetry.instrumentation.langchain import LangchainInstrumentor

@@ -7,12 +7,21 @@ from langchain_openai import AzureChatOpenAI
 from langchain_core.tools import tool
 
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-from promptflow.tracing import start_trace
 import random
 
+from opentelemetry import trace
+# from opentelemetry.sdk.trace import TracerProvider
+# from opentelemetry.sdk.trace.export import (
+#     BatchSpanProcessor,
+#     ConsoleSpanExporter,
+# )
+
+# trace.get_tracer_provider().add_span_processor(
+#     BatchSpanProcessor(ConsoleSpanExporter())
+# )
+tracer = trace.get_tracer(__name__)
+
 dotenv.load_dotenv()
-# start a trace session, and print a url for user to check trace
-start_trace()
 
 # enable langchain instrumentation
 from opentelemetry.instrumentation.langchain import LangchainInstrumentor
@@ -62,8 +71,10 @@ if "AZURE_OPENAI_API_KEY" in os.environ:
         azure_deployment=os.getenv("AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME"),
         openai_api_version=os.getenv("AZURE_OPENAI_VERSION"),
         temperature=0,
-        streaming=True
+        streaming=True,
+        # model_kwargs={"stream_options": {"include_usage": True}}
     )
+
 else:
     token_provider = get_bearer_token_provider(DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default")
     llm = AzureChatOpenAI(
@@ -86,12 +97,13 @@ from langchain_community.utilities import SQLDatabase
 db = SQLDatabase.from_uri(odbc_str)
 print(db.dialect)
 print(db.get_usable_table_names())
-print(db.get_table_info())
+# print(db.get_table_info())
 
 from langchain_community.agent_toolkits import SQLDatabaseToolkit
 
 toolkit = SQLDatabaseToolkit(db=db, llm=llm)
 tools = toolkit.get_tools()
+print(tools)
 
 # list_tables_tool = next(tool for tool in tools if tool.name == "sql_db_list_tables")
 # get_schema_tool = next(tool for tool in tools if tool.name == "sql_db_schema")
@@ -122,6 +134,8 @@ Only use the below tools. Only use the information returned by the below tools t
 You MUST double check your query before executing it. If you get an error while executing a query, rewrite the query and try again.
 
 DO NOT make any DML statements (INSERT, UPDATE, DELETE, DROP etc.) to the database.
+
+DO NOT USE the QuerySQLCheckerTool.
 
 You have access to the following tables: {table_names}
 
@@ -198,27 +212,6 @@ New input: {input}
 
 """
 
-
-# sql_react_prompt = """You are an Assistant is designed to be able to assist with answering questions that will source information form a SQL database.
-# Your objective is answer simple questions as well as to provide in-depth explanations and discussions on a wide range of topics. 
-# As a language model, Assistant is able to generate human-like text based on the input it receives, allowing it to engage in natural-sounding conversations and provide responses that are coherent and relevant to the topic at hand.
-
-# You are a SQL expert with a strong attention to detail.
-# Double check the SQL Server query for common mistakes, including:
-# - Using NOT IN with NULL values
-# - Using UNION when UNION ALL should have been used
-# - Using BETWEEN for exclusive ranges
-# - Data type mismatch in predicates
-# - Properly quoting identifiers
-# - Using the correct number of arguments for functions
-# - Casting to the correct data type
-# - Using the proper columns for joins
-# - Not using any create or drop statements
-
-# If there are any of the above mistakes, rewrite the query. If there are no mistakes, just reproduce the original query.
-
-# """
-
 from langchain.agents import create_structured_chat_agent
 from langchain import agents
 from langchain_community.callbacks.streamlit import (
@@ -232,7 +225,7 @@ agent = create_structured_chat_agent(llm, tools, prompt)
 
 agent_executor = agents.AgentExecutor(
         name="Tools Agent",
-        agent=agent, tools=tools, verbose=True, handle_parsing_errors=True, max_iterations=10, return_intermediate_steps=True, 
+        agent=agent, tools=tools, verbose=True, handle_parsing_errors=True, max_iterations=10, return_intermediate_steps=False, 
         # handle errors
         error_message="I'm sorry, I couldn't understand that. Please try to describe your question in a different way.",
     )
@@ -248,9 +241,15 @@ if human_query is not None and human_query != "":
 
     with st.chat_message("assistant"):
         st_callback = StreamlitCallbackHandler(st.container())
-        response = agent_executor.invoke(
-            {"input": human_query, "chat_history": st.session_state.chat_history, "table_names": db.get_usable_table_names()}, {"callbacks": [st_callback]}, 
-        )
+        with tracer.start_as_current_span("agent-chain") as span:
+            response = agent_executor.invoke(
+                {"input": human_query, "chat_history": st.session_state.chat_history, "table_names": db.get_usable_table_names()}, {"callbacks": [st_callback]}, 
+            )
 
-        ai_response = st.write(response["output"])
+            span.set_attribute("llm.usage.completion_tokens",5) 
+            span.set_attribute("llm.usage.prompt_tokens", 100) 
+            span.set_attribute("llm.usage.total_tokens", 150) 
+            
+            ai_response = st.write(response["output"])
+            print(response)
 
