@@ -280,6 +280,10 @@ workflow.add_node("execute_query", create_tool_node_with_fallback([db_query_tool
 
 format_system = """
 You receive an unformatted input message and need to format it into a human readable, meaningful response.
+
+If the input message contains tabular data, you should format it into a table. 
+If the input message contains a list of items, you should format it into a list.
+If the input message contains a single item, you should format it into a sentence.
 ---
 {input}
 """
