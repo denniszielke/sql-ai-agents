@@ -1,12 +1,9 @@
 {
     "name": "Azure Developer CLI",
-    "build": {
-        "dockerfile": "Dockerfile",
-        "args": {
-            "VARIANT": "bullseye",
-            "VERSION": "3.12"
-        }
-    },
+    "dockerComposeFile": "docker-compose.yml",
+    "service": "devcontainer",
+    "workspaceFolder": "/workspace",
+    "shutdownAction": "stopCompose",
     "features": {
         "ghcr.io/devcontainers/features/azure-cli:1": {
             "version": "2.62.0"
@@ -52,7 +49,7 @@
     },
     "portsAttributes": {
         "8000": {
-            "label": "Streamlit UI
+            "label": "Streamlit UI"
         }
     }
 }
