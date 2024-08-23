@@ -4,6 +4,20 @@ This project demonstrates different approaches on how to implement a bot that ca
 
 ![image info](./screenshot.png)
 
+## Implementation patterns
+
+1.) Simple prompt
+
+![image info](./simple.png)
+
+2.) ReAct based Prompt
+
+![image info](./tools.png)
+
+3.) Multi agent
+
+![image info](./agents.png)
+
 ## Deploy Infrastructure
 
 ```
