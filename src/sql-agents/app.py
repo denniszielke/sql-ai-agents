@@ -4,7 +4,8 @@ from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 import streamlit as st
 import random
 from langchain_openai import AzureChatOpenAI
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, BaseMessage
+from langchain_core.outputs.llm_result import LLMResult
 
 from typing import Annotated, TypedDict
 
@@ -15,6 +16,7 @@ from typing import Annotated, Literal
 
 from langchain_core.messages import AIMessage
 from langchain_core.pydantic_v1 import BaseModel, Field
+import tiktoken
 from typing_extensions import TypedDict
 
 from langgraph.graph import END, StateGraph, START
@@ -45,6 +47,9 @@ from opentelemetry.sdk import trace as trace_sdk
 from opentelemetry.sdk.trace.export import ConsoleSpanExporter, SimpleSpanProcessor
 from azure.monitor.opentelemetry import configure_azure_monitor
 from opentelemetry.instrumentation.langchain import LangchainInstrumentor
+from langchain.agents.agent import AgentAction
+from langchain_core.callbacks import AsyncCallbackHandler, BaseCallbackHandler
+from typing import Any, Dict, List
 
 st.set_page_config(
     page_title="AI agentic bot that can interact with a database"
@@ -80,6 +85,14 @@ def create_session(st: st) -> None:
 tracer = setup_tracing()
 create_session(st)
 
+def num_tokens_from_messages(messages: List[str]) -> int:
+    encoding = tiktoken.encoding_for_model("gpt-4")
+    num_tokens = 3 #min token count for gpt-4 models. Its probably more but enough for a good estimation
+    for message in messages:
+        num_tokens += len(encoding.encode(message))
+
+    return num_tokens
+
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
@@ -97,6 +110,18 @@ for message in st.session_state.chat_history:
         with st.chat_message("Agent"):
             st.markdown(message.content)
 
+class TokenCounterCallback(BaseCallbackHandler):
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+
+    def on_chat_model_start(self, serialized: Dict[str, Any], messages: List[List[BaseMessage]], **kwargs: Any) -> Any:
+        self.prompt_tokens += num_tokens_from_messages([message.content for message in messages[0]])
+    def on_llm_end(self, response: LLMResult, **kwargs: Any) -> Any:
+        self.completion_tokens += num_tokens_from_messages([generation.text for generation in response.generations[0]])
+
+callback = TokenCounterCallback()
+
 llm: AzureChatOpenAI = None
 if "AZURE_OPENAI_API_KEY" in os.environ:
     llm = AzureChatOpenAI(
@@ -105,7 +130,8 @@ if "AZURE_OPENAI_API_KEY" in os.environ:
         azure_deployment=os.getenv("AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME"),
         openai_api_version=os.getenv("AZURE_OPENAI_VERSION"),
         temperature=0,
-        streaming=True
+        streaming=True,
+        callbacks=[callback]
     )
 else:
     token_provider = get_bearer_token_provider(DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default")
@@ -116,7 +142,8 @@ else:
         openai_api_version=os.getenv("AZURE_OPENAI_VERSION"),
         temperature=0,
         openai_api_type="azure_ad",
-        streaming=True
+        streaming=True,
+        callbacks=[callback]
     )
 
 driver = '{ODBC Driver 18 for SQL Server}'
@@ -363,12 +390,13 @@ if human_query is not None and human_query != "":
                     print("Tool:", message.content)
                     with st.chat_message("Tool"):
                         st.write(message.content.replace('\n\n', ''))
-        span.set_attribute("llm.usage.completion_tokens",5) 
-        span.set_attribute("llm.usage.prompt_tokens", 100) 
-        span.set_attribute("llm.usage.total_tokens", 150) 
+        span.set_attribute("llm.usage.completion_tokens",callback.completion_tokens) 
+        span.set_attribute("llm.usage.prompt_tokens", callback.prompt_tokens) 
+        span.set_attribute("llm.usage.total_tokens", callback.completion_tokens + callback.prompt_tokens) 
 
     with st.chat_message("Agent"):
         st.write("The conversation has ended. Those were the steps taken to answer your query.")
+        st.write("The total number of tokens used in this conversation was: ", callback.completion_tokens + callback.prompt_tokens)
         st.image(
             app.get_graph(xray=True).draw_mermaid_png(
                 draw_method=MermaidDrawMethod.API,
