@@ -93,7 +93,6 @@ for message in st.session_state.chat_history:
             st.markdown(message.content)
 
 class TokenCounterCallback(BaseCallbackHandler):
-
     prompt_tokens: int = 0
     completion_tokens: int = 0
 
@@ -175,37 +174,12 @@ def db_query_tool(query: str) -> str:
         return "Error: Query failed. Please rewrite your query and try again."
     return result
 
-query_check_system = """You are a SQL expert with a strong attention to detail.
-Double check the SQL Server query for common mistakes, including:
-- Using NOT IN with NULL values
-- Using UNION when UNION ALL should have been used
-- Using BETWEEN for exclusive ranges
-- Data type mismatch in predicates
-- Properly quoting identifiers
-- Using the correct number of arguments for functions
-- Casting to the correct data type
-- Using the proper columns for joins
-- Not using any create or drop statements
-
-If there are any of the above mistakes, rewrite the query. If there are no mistakes, just reproduce the original query.
-
-You will call the appropriate tool to execute the query after running this check."""
-
-query_check_prompt = ChatPromptTemplate.from_messages(
-    [("system", query_check_system), ("placeholder", "{messages}")]
-)
-query_check = query_check_prompt | llm.bind_tools(
-    [db_query_tool], tool_choice="required"
-)
-
 # Define the state for the agent
 class State(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
 
-
 # Define a new graph
 workflow = StateGraph(State)
-
 
 # Add a node for the first tool call
 def first_tool_call(state: State) -> dict[str, list[AIMessage]]:
@@ -223,14 +197,6 @@ def first_tool_call(state: State) -> dict[str, list[AIMessage]]:
             )
         ]
     }
-
-
-def model_check_query(state: State) -> dict[str, list[AIMessage]]:
-    """
-    Use this tool to double-check if your query is correct before executing it.
-    """
-    return {"messages": [query_check.invoke({"messages": [state["messages"][-1]]})]}
-
 
 workflow.add_node("first_tool_call", first_tool_call)
 
@@ -253,32 +219,61 @@ workflow.add_node(
 
 #-----------------------------------------------------------------------------------------------
 
-# Add a node for a model to generate a query based on the question and schema
-query_gen_system = """You are a SQL expert with a strong attention to detail.
-
-Given an input question, output a syntactically correct SQL Server query.
-
-When generating the query:
-
-Unless the user specifies a specific number of examples they wish to obtain, always limit your query to at most 5 results.
-You can order the results by a relevant column to return the most interesting examples in the database.
-Never query for all the columns from a specific table, only ask for the relevant columns given the question.
-
-If you have enough information to answer the input question, simply invoke the appropriate tool to submit the final answer to the user.
-
-DO NOT make any DML statements (CREATE, INSERT, UPDATE, DELETE, DROP etc.) to the database."""
-query_gen_prompt = ChatPromptTemplate.from_messages(
-    [("system", query_gen_system), ("placeholder", "{messages}")]
-)
-query_gen = query_gen_prompt | llm
-
 def query_gen_node(state: State):
+    # Add a node for a model to generate a query based on the question and schema
+    query_gen_system = """You are a SQL expert with a strong attention to detail.
+
+    Given an input question, output a syntactically correct SQL Server query.
+
+    When generating the query:
+
+    Unless the user specifies a specific number of examples they wish to obtain, always limit your query to at most 5 results.
+    You can order the results by a relevant column to return the most interesting examples in the database.
+    Never query for all the columns from a specific table, only ask for the relevant columns given the question.
+
+    If you have enough information to answer the input question, simply invoke the appropriate tool to submit the final answer to the user.
+
+    DO NOT make any DML statements (CREATE, INSERT, UPDATE, DELETE, DROP etc.) to the database."""
+    query_gen_prompt = ChatPromptTemplate.from_messages(
+        [("system", query_gen_system), ("placeholder", "{messages}")]
+    )
+    query_gen = query_gen_prompt | llm
+
     return {"messages": [query_gen.invoke(state)]}
 
 
 workflow.add_node("query_gen", query_gen_node)
 
 #-----------------------------------------------------------------------------------------------
+
+def model_check_query(state: State) -> dict[str, list[AIMessage]]:
+    """
+    Use this tool to double-check if your query is correct before executing it.
+    """
+
+    query_check_system = """You are a SQL expert with a strong attention to detail.
+    Double check the SQL Server query for common mistakes, including:
+    - Using NOT IN with NULL values
+    - Using UNION when UNION ALL should have been used
+    - Using BETWEEN for exclusive ranges
+    - Data type mismatch in predicates
+    - Properly quoting identifiers
+    - Using the correct number of arguments for functions
+    - Casting to the correct data type
+    - Using the proper columns for joins
+    - Not using any create or drop statements
+
+    If there are any of the above mistakes, rewrite the query. If there are no mistakes, just reproduce the original query.
+
+    You will call the appropriate tool to execute the query after running this check."""
+
+    query_check_prompt = ChatPromptTemplate.from_messages(
+        [("system", query_check_system), ("placeholder", "{messages}")]
+    )
+    query_check = query_check_prompt | llm.bind_tools(
+        [db_query_tool], tool_choice="required"
+    )
+    return {"messages": [query_check.invoke({"messages": [state["messages"][-1]]})]}
 
 # Add a node for the model to check the query before executing it
 workflow.add_node("correct_query", model_check_query)
@@ -288,24 +283,38 @@ workflow.add_node("execute_query", create_tool_node_with_fallback([db_query_tool
 
 #-----------------------------------------------------------------------------------------------
 
-format_system = """
-You receive an unformatted input message and need to format it into a human readable, meaningful response.
-
-If the input message contains tabular data, you should format it into a table. 
-If the input message contains a list of items, you should format it into a list.
-If the input message contains a single item, you should format it into a sentence.
----
-{input}
-"""
-format_prompt = ChatPromptTemplate.from_messages(
-    [("system", format_system), ("placeholder", "{input}")]
-)
-format_gen = format_prompt | llm
-
 def format_gen_node(state: State):
+    format_system = """
+    You receive an unformatted input message and need to format it into a human readable, meaningful response.
+
+    If the input message contains tabular data, you should format it into a table. 
+    If the input message contains a list of items, you should format it into a list.
+    If the input message contains a single item, you should format it into a sentence.
+    ---
+    {input}
+    """
+    format_prompt = ChatPromptTemplate.from_messages(
+        [("system", format_system), ("placeholder", "{input}")]
+    )
+    format_gen = format_prompt | llm
+
     return {"messages": [format_gen.invoke({"input": [state["messages"][-1].content]})]}
 
 workflow.add_node("format_gen", format_gen_node)
+
+#-----------------------------------------------------------------------------------------------
+
+@tool
+def generate_graph_summary() -> None:
+    st.write("The conversation has ended. Those were the steps taken to answer your query.")
+    st.write("The total number of tokens used in this conversation was: ", callback.completion_tokens + callback.prompt_tokens)
+    st.image(
+        workflow.get_graph(xray=True).draw_mermaid_png(
+            draw_method=MermaidDrawMethod.API,
+        )
+    )
+
+workflow.add_node("summary", generate_graph_summary)
 
 #-----------------------------------------------------------------------------------------------
 
@@ -331,7 +340,8 @@ workflow.add_conditional_edges(
     "execute_query",
     should_continue,
 )
-workflow.add_edge("format_gen", END)
+workflow.add_edge("format_gen", "summary")
+workflow.add_edge("summary", END)
 
 # Compile the workflow into a runnable
 app = workflow.compile()
@@ -374,13 +384,4 @@ if human_query is not None and human_query != "":
                         st.write(message.content.replace('\n\n', ''))
         span.set_attribute("llm.usage.completion_tokens",callback.completion_tokens) 
         span.set_attribute("llm.usage.prompt_tokens", callback.prompt_tokens) 
-        span.set_attribute("llm.usage.total_tokens", callback.completion_tokens + callback.prompt_tokens) 
-
-    with st.chat_message("Agent"):
-        st.write("The conversation has ended. Those were the steps taken to answer your query.")
-        st.write("The total number of tokens used in this conversation was: ", callback.completion_tokens + callback.prompt_tokens)
-        st.image(
-            app.get_graph(xray=True).draw_mermaid_png(
-                draw_method=MermaidDrawMethod.API,
-            )
-        )
+        span.set_attribute("llm.usage.total_tokens", callback.completion_tokens + callback.prompt_tokens)
