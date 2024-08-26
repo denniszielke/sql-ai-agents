@@ -1,55 +1,37 @@
 import os
-import dotenv
-from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-import streamlit as st
 import random
+from typing import Any, Dict, List, Literal, Annotated, TypedDict
+
+import dotenv
 from langchain_openai import AzureChatOpenAI
+import streamlit as st
+import tiktoken
+from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
+from IPython.display import Image
+from langchain.agents.agent import AgentAction
+from langchain_community.agent_toolkits import SQLDatabaseToolkit
+from langchain_community.utilities import SQLDatabase
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, BaseMessage
 from langchain_core.outputs.llm_result import LLMResult
-
-from typing import Annotated, TypedDict
-
-
-from langgraph.graph.message import add_messages
-
-from typing import Annotated, Literal
-
-from langchain_core.messages import AIMessage
-from langchain_core.pydantic_v1 import BaseModel, Field
-import tiktoken
-from typing_extensions import TypedDict
-
-from langgraph.graph import END, StateGraph, START
-from langgraph.graph.message import AnyMessage, add_messages
-
-from typing import Any
-
-from langchain_core.messages import ToolMessage
-from langchain_core.runnables import RunnableLambda, RunnableWithFallbacks
-from langgraph.prebuilt import ToolNode
-from langchain_community.utilities import SQLDatabase
-from langchain_community.agent_toolkits import SQLDatabaseToolkit
-from langchain_core.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
-from IPython.display import Image
+from langchain_core.pydantic_v1 import BaseModel, Field
+from langchain_core.runnables import RunnableLambda, RunnableWithFallbacks
 from langchain_core.runnables.graph import CurveStyle, MermaidDrawMethod, NodeStyles
-
-dotenv.load_dotenv()
-
-from opentelemetry import trace
+from langchain_core.tools import tool
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import AnyMessage, add_messages
+from langgraph.prebuilt import ToolNode
+from openinference.instrumentation.langchain import LangChainInstrumentor
+from opentelemetry import trace, trace as trace_api
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.langchain import LangchainInstrumentor
+from opentelemetry.sdk import trace as trace_sdk
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
-from openinference.instrumentation.langchain import LangChainInstrumentor
-from opentelemetry import trace as trace_api
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk import trace as trace_sdk
-from opentelemetry.sdk.trace.export import ConsoleSpanExporter, SimpleSpanProcessor
-from azure.monitor.opentelemetry import configure_azure_monitor
-from opentelemetry.instrumentation.langchain import LangchainInstrumentor
-from langchain.agents.agent import AgentAction
-from langchain_core.callbacks import AsyncCallbackHandler, BaseCallbackHandler
-from typing import Any, Dict, List
+
+dotenv.load_dotenv()
 
 st.set_page_config(
     page_title="AI agentic bot that can interact with a database"
