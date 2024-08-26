@@ -168,8 +168,6 @@ query_check = query_check_prompt | llm.bind_tools(
     [db_query_tool], tool_choice="required"
 )
 
-query_check.invoke({"messages": [("user", "SELECT TOP 3 * FROM Orders")]})
-
 # Define the state for the agent
 class State(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
