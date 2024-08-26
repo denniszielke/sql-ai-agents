@@ -16,3 +16,6 @@ langgraph==0.2.5
 sqlalchemy==2.0.32
 pyodbc==5.1.0
 ipython==8.26.0
+azure-monitor-opentelemetry-exporter==1.0.0b28
+azure-monitor-opentelemetry==1.6.1
+openinference-instrumentation-langchain==0.1.27
