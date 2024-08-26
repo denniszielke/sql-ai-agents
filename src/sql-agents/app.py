@@ -4,7 +4,6 @@ from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 import streamlit as st
 import random
 from langchain_openai import AzureChatOpenAI
-from langchain_openai import AzureOpenAIEmbeddings
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 from typing import Annotated, TypedDict
@@ -69,7 +68,6 @@ for message in st.session_state.chat_history:
             st.markdown(message.content)
 
 llm: AzureChatOpenAI = None
-embeddings_model: AzureOpenAIEmbeddings = None
 if "AZURE_OPENAI_API_KEY" in os.environ:
     llm = AzureChatOpenAI(
         azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
@@ -78,12 +76,6 @@ if "AZURE_OPENAI_API_KEY" in os.environ:
         openai_api_version=os.getenv("AZURE_OPENAI_VERSION"),
         temperature=0,
         streaming=True
-    )
-    embeddings_model = AzureOpenAIEmbeddings(    
-        azure_deployment = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME"),
-        openai_api_version = os.getenv("AZURE_OPENAI_VERSION"),
-        model= os.getenv("AZURE_OPENAI_EMBEDDING_MODEL"),
-        api_key=os.getenv("AZURE_OPENAI_API_KEY")
     )
 else:
     token_provider = get_bearer_token_provider(DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default")
@@ -95,12 +87,6 @@ else:
         temperature=0,
         openai_api_type="azure_ad",
         streaming=True
-    )
-    embeddings_model = AzureOpenAIEmbeddings(    
-        azure_deployment = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME"),
-        openai_api_version = os.getenv("AZURE_OPENAI_VERSION"),
-        model= os.getenv("AZURE_OPENAI_EMBEDDING_MODEL"),
-        azure_ad_token_provider = token_provider
     )
 
 def get_session_id() -> str:
