@@ -19,7 +19,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.runnables import RunnableLambda, RunnableWithFallbacks
 from langchain_core.runnables.graph import CurveStyle, MermaidDrawMethod, NodeStyles
-from langchain_core.tools import tool
+from langchain_core.tools import tool, BaseTool
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import AnyMessage, add_messages
 from langgraph.prebuilt import ToolNode
@@ -175,41 +175,53 @@ class State(TypedDict):
 # Define a new graph
 workflow = StateGraph(State)
 
-# Add a node for the first tool call
-def first_tool_call(state: State) -> dict[str, list[AIMessage]]:
-    return {
-        "messages": [
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "sql_db_list_tables",
-                        "args": {},
-                        "id": "tool_abcd123",
-                    }
-                ],
+#-----------------------------------------------------------------------------------------------
+
+def call_model(prompt: str, tools: dict[str, BaseTool], state: State) -> dict[str, list[AIMessage]]:
+    query_gen_prompt = ChatPromptTemplate.from_messages(
+        [("system", prompt), ("placeholder", "{messages}")]
+    )
+
+    if not tools:
+        model_get_schema = query_gen_prompt | llm
+    else:
+        model_get_schema = query_gen_prompt | llm.bind_tools(
+            list(tools.values()), tool_choice="auto"
+        )
+
+    message = model_get_schema.invoke({"messages": state["messages"]})
+    tool_messages = []
+    for tool_call in message.tool_calls:
+        selected_tool = tools[tool_call["name"]]
+        result = selected_tool.invoke(tool_call["args"])    
+        tool_messages.append(
+            ToolMessage(
+                content=result,
+                tool_call_id=tool_call["id"],
             )
-        ]
-    }
+        )
 
-workflow.add_node("first_tool_call", first_tool_call)
+    return {"messages": [message] + tool_messages}
 
-# Add nodes for the first two tools
-workflow.add_node(
-    "list_tables_tool", create_tool_node_with_fallback([list_tables_tool])
-)
-workflow.add_node("get_schema_tool", create_tool_node_with_fallback([get_schema_tool]))
+#-----------------------------------------------------------------------------------------------
 
-# Add a node for a model to choose the relevant tables based on the question and available tables
-model_get_schema = llm.bind_tools(
-    [get_schema_tool]
-)
-workflow.add_node(
-    "model_get_schema",
-    lambda state: {
-        "messages": [model_get_schema.invoke(state["messages"])],
-    },
-)
+def first(state: State) -> dict[str, list[AIMessage]]:
+    prompt = """You are a SQL expert with a strong attention to detail.
+        Use the provided tool to extract the list of tables in the database.
+    """
+    return call_model(prompt, {"sql_db_list_tables": list_tables_tool}, state)
+
+workflow.add_node("first_tool_call", first)
+
+#-----------------------------------------------------------------------------------------------
+
+def second(state: State) -> dict[str, list[AIMessage]]:
+    prompt = """You are a SQL expert with a strong attention to detail.
+        Take the tools to extract the schema and table information from the database.
+    """
+    return call_model(prompt, {"sql_db_schema": get_schema_tool}, state)
+
+workflow.add_node("second_tool_call", second)
 
 #-----------------------------------------------------------------------------------------------
 
@@ -310,10 +322,9 @@ def should_continue(state: State) -> Literal["format_gen", "query_gen"]:
 
 # Specify the edges between the nodes
 workflow.add_edge(START, "first_tool_call")
-workflow.add_edge("first_tool_call", "list_tables_tool")
-workflow.add_edge("list_tables_tool", "model_get_schema")
-workflow.add_edge("model_get_schema", "get_schema_tool")
-workflow.add_edge("get_schema_tool", "query_gen")
+workflow.add_edge(START, "second_tool_call")
+workflow.add_edge("first_tool_call", "query_gen")
+workflow.add_edge("second_tool_call", "query_gen")
 workflow.add_edge("query_gen", "correct_query")
 workflow.add_edge("correct_query", "execute_query")
 workflow.add_conditional_edges(
@@ -322,7 +333,6 @@ workflow.add_conditional_edges(
 )
 workflow.add_edge("format_gen", END)
 
-# Compile the workflow into a runnable
 app = workflow.compile()
 
 human_query = st.chat_input()
