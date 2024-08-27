@@ -68,38 +68,32 @@ tracer = setup_tracing()
 create_session(st)
 
 def num_tokens_from_messages(messages: List[str]) -> int:
-    encoding = tiktoken.encoding_for_model("gpt-4")
-    num_tokens = 3 #min token count for gpt-4 models. Its probably more but enough for a good estimation
-    for message in messages:
-        num_tokens += len(encoding.encode(message))
+    '''
+    Calculate the number of tokens in a list of messages. This is a somewhat naive implementation that simply concatenates 
+    the messages and counts the tokens in the resulting string. A more accurate implementation would take into account the 
+    fact that the messages are separate and should be counted as separate sequences.
+    If available, the token count should be taken directly from the model response.
+    '''
+    encoding = tiktoken.encoding_for_model("gpt-4o")
+    num_tokens = 0
+    content = ' '.join(messages)
+    num_tokens += len(encoding.encode(content))
 
     return num_tokens
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-for message in st.session_state.chat_history:
-    if isinstance(message, HumanMessage):
-        with st.chat_message("Human"):
-            st.markdown(message.content)
-    elif isinstance(message, AIMessage):
-        with st.chat_message("AI"):
-            st.markdown(message.content)
-    elif isinstance(message, ToolMessage):
-        with st.chat_message("Tool"):
-            st.markdown(message.content)
-    else:
-        with st.chat_message("Agent"):
-            st.markdown(message.content)
-
 class TokenCounterCallback(BaseCallbackHandler):
     prompt_tokens: int = 0
     completion_tokens: int = 0
 
+    def on_llm_new_token(self, token: str, **kwargs: Any) -> Any:
+        self.completion_tokens += 1
+
     def on_chat_model_start(self, serialized: Dict[str, Any], messages: List[List[BaseMessage]], **kwargs: Any) -> Any:
-        self.prompt_tokens += num_tokens_from_messages([message.content for message in messages[0]])
-    def on_llm_end(self, response: LLMResult, **kwargs: Any) -> Any:
-        self.completion_tokens += num_tokens_from_messages([generation.text for generation in response.generations[0]])
+        self.prompt_tokens += num_tokens_from_messages( [message.content for message in messages[0]])
+         
 
 callback = TokenCounterCallback()
 
@@ -304,20 +298,6 @@ workflow.add_node("format_gen", format_gen_node)
 
 #-----------------------------------------------------------------------------------------------
 
-@tool
-def generate_graph_summary() -> None:
-    st.write("The conversation has ended. Those were the steps taken to answer your query.")
-    st.write("The total number of tokens used in this conversation was: ", callback.completion_tokens + callback.prompt_tokens)
-    st.image(
-        workflow.get_graph(xray=True).draw_mermaid_png(
-            draw_method=MermaidDrawMethod.API,
-        )
-    )
-
-workflow.add_node("summary", generate_graph_summary)
-
-#-----------------------------------------------------------------------------------------------
-
 # Define a conditional edge to decide whether to continue or end the workflow
 def should_continue(state: State) -> Literal["format_gen", "query_gen"]:
     messages = state["messages"]
@@ -340,8 +320,7 @@ workflow.add_conditional_edges(
     "execute_query",
     should_continue,
 )
-workflow.add_edge("format_gen", "summary")
-workflow.add_edge("summary", END)
+workflow.add_edge("format_gen", END)
 
 # Compile the workflow into a runnable
 app = workflow.compile()
@@ -382,6 +361,14 @@ if human_query is not None and human_query != "":
                     print("Tool:", message.content)
                     with st.chat_message("Tool"):
                         st.write(message.content.replace('\n\n', ''))
-        span.set_attribute("llm.usage.completion_tokens",callback.completion_tokens) 
-        span.set_attribute("llm.usage.prompt_tokens", callback.prompt_tokens) 
-        span.set_attribute("llm.usage.total_tokens", callback.completion_tokens + callback.prompt_tokens)
+
+        st.write("The conversation has ended. Those were the steps taken to answer your query.")
+        st.write("The total number of tokens used in this conversation was: ", callback.completion_tokens + callback.prompt_tokens)
+        st.image(
+            app.get_graph(xray=True).draw_mermaid_png(
+                draw_method=MermaidDrawMethod.API,
+            )
+        )
+        span.set_attribute("gen_ai.response.completion_token",callback.completion_tokens) 
+        span.set_attribute("gen_ai.response.prompt_tokens", callback.prompt_tokens) 
+        span.set_attribute("gen_ai.response.total_tokens", callback.completion_tokens + callback.prompt_tokens)
