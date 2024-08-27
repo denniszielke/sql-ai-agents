@@ -177,7 +177,28 @@ workflow = StateGraph(State)
 
 #-----------------------------------------------------------------------------------------------
 
-def call_model(prompt: str, tools: dict[str, BaseTool], state: State) -> dict[str, list[AIMessage]]:
+def wrap_tool_call(tool: BaseTool, args: Any) -> dict[str, list[AIMessage]]:
+    tool_id = "tool_" + tool.name
+    message = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": tool.name,
+                "args": args,
+                "id": tool_id,
+            }
+        ],
+    )
+    tool_result = tool.invoke(args)
+    tool_message = ToolMessage(
+        content=tool_result,
+        tool_call_id=tool_id,
+    )
+    return {"messages": [message, tool_message]}
+
+#-----------------------------------------------------------------------------------------------
+
+def call_model(prompt: str, tools: dict[str, BaseTool], input: Any) -> dict[str, list[AIMessage]]:
     query_gen_prompt = ChatPromptTemplate.from_messages(
         [("system", prompt), ("placeholder", "{messages}")]
     )
@@ -186,10 +207,10 @@ def call_model(prompt: str, tools: dict[str, BaseTool], state: State) -> dict[st
         model_get_schema = query_gen_prompt | llm
     else:
         model_get_schema = query_gen_prompt | llm.bind_tools(
-            list(tools.values()), tool_choice="auto"
+            list(tools.values()), tool_choice="required"
         )
 
-    message = model_get_schema.invoke({"messages": state["messages"]})
+    message = model_get_schema.invoke(input)
     tool_messages = []
     for tool_call in message.tool_calls:
         selected_tool = tools[tool_call["name"]]
@@ -206,6 +227,7 @@ def call_model(prompt: str, tools: dict[str, BaseTool], state: State) -> dict[st
 #-----------------------------------------------------------------------------------------------
 
 def first(state: State) -> dict[str, list[AIMessage]]:
+    #return wrap_tool_call(list_tables_tool, state)
     prompt = """You are a SQL expert with a strong attention to detail.
         Use the provided tool to extract the list of tables in the database.
     """
@@ -216,6 +238,7 @@ workflow.add_node("first_tool_call", first)
 #-----------------------------------------------------------------------------------------------
 
 def second(state: State) -> dict[str, list[AIMessage]]:
+    #return wrap_tool_call(get_schema_tool, {"table_names": state["messages"][-1].content})
     prompt = """You are a SQL expert with a strong attention to detail.
         Take the tools to extract the schema and table information from the database.
     """
@@ -226,7 +249,6 @@ workflow.add_node("second_tool_call", second)
 #-----------------------------------------------------------------------------------------------
 
 def query_gen_node(state: State):
-    # Add a node for a model to generate a query based on the question and schema
     query_gen_system = """You are a SQL expert with a strong attention to detail.
 
     Given an input question, output a syntactically correct SQL Server query.
@@ -240,12 +262,8 @@ def query_gen_node(state: State):
     If you have enough information to answer the input question, simply invoke the appropriate tool to submit the final answer to the user.
 
     DO NOT make any DML statements (CREATE, INSERT, UPDATE, DELETE, DROP etc.) to the database."""
-    query_gen_prompt = ChatPromptTemplate.from_messages(
-        [("system", query_gen_system), ("placeholder", "{messages}")]
-    )
-    query_gen = query_gen_prompt | llm
 
-    return {"messages": [query_gen.invoke(state)]}
+    return call_model(query_gen_system, {}, state)
 
 
 workflow.add_node("query_gen", query_gen_node)
@@ -322,8 +340,8 @@ def should_continue(state: State) -> Literal["format_gen", "query_gen"]:
 
 # Specify the edges between the nodes
 workflow.add_edge(START, "first_tool_call")
-workflow.add_edge(START, "second_tool_call")
-workflow.add_edge("first_tool_call", "query_gen")
+workflow.add_edge("first_tool_call", "second_tool_call")
+#workflow.add_edge("first_tool_call", "query_gen")
 workflow.add_edge("second_tool_call", "query_gen")
 workflow.add_edge("query_gen", "correct_query")
 workflow.add_edge("correct_query", "execute_query")
