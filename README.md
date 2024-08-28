@@ -65,6 +65,7 @@ docker run --rm --name jaeger \
   -p 9411:9411 \
   jaegertracing/all-in-one:1.60
 
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 
 opentelemetry-instrument --service_name sql-ai-agent python -m streamlit run app.py --server.port=8000
 
