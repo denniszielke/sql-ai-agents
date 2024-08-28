@@ -128,28 +128,6 @@ odbc_str = 'mssql+pyodbc:///?odbc_connect=' \
 
 db = SQLDatabase.from_uri(odbc_str)
 
-def create_tool_node_with_fallback(tools: list) -> RunnableWithFallbacks[Any, dict]:
-    """
-    Create a ToolNode with a fallback to handle errors and surface them to the agent.
-    """
-    return ToolNode(tools).with_fallbacks(
-        [RunnableLambda(handle_tool_error)], exception_key="error"
-    )
-
-
-def handle_tool_error(state) -> dict:
-    error = state.get("error")
-    tool_calls = state["messages"][-1].tool_calls
-    return {
-        "messages": [
-            ToolMessage(
-                content=f"Error: {repr(error)}\n please fix your mistakes.",
-                tool_call_id=tc["id"],
-            )
-            for tc in tool_calls
-        ]
-    }
-
 toolkit = SQLDatabaseToolkit(db=db, llm=llm)
 tools = toolkit.get_tools()
 
@@ -177,81 +155,39 @@ workflow = StateGraph(State)
 
 #-----------------------------------------------------------------------------------------------
 
-def wrap_tool_call(tool: BaseTool, args: Any) -> dict[str, list[AIMessage]]:
-    tool_id = "tool_" + tool.name
-    message = AIMessage(
-        content="",
-        tool_calls=[
-            {
-                "name": tool.name,
-                "args": args,
-                "id": tool_id,
-            }
-        ],
-    )
-    tool_result = tool.invoke(args)
-    tool_message = ToolMessage(
-        content=tool_result,
-        tool_call_id=tool_id,
-    )
-    return {"messages": [message, tool_message]}
-
-#-----------------------------------------------------------------------------------------------
-
-def call_model(prompt: str, tools: dict[str, BaseTool], input: Any) -> dict[str, list[AIMessage]]:
-    query_gen_prompt = ChatPromptTemplate.from_messages(
-        [("system", prompt), ("placeholder", "{messages}")]
-    )
-
-    if not tools:
-        model_get_schema = query_gen_prompt | llm
-    else:
-        model_get_schema = query_gen_prompt | llm.bind_tools(
-            list(tools.values()), tool_choice="required"
-        )
-
-    message = model_get_schema.invoke(input)
-    tool_messages = []
-    for tool_call in message.tool_calls:
-        selected_tool = tools[tool_call["name"]]
-        result = selected_tool.invoke(tool_call["args"])    
-        tool_messages.append(
-            ToolMessage(
-                content=result,
-                tool_call_id=tool_call["id"],
+def workflow_trigger(state: State) -> dict[str, list[AIMessage]]:
+    return {
+        "messages": [
+            AIMessage(
+                content="",
+                tool_calls=[{"id":"tool_sql_db_list_tables", "name": "sql_db_list_tables", "args": {}}]
             )
-        )
+        ]
+    }
 
-    return {"messages": [message] + tool_messages}
+workflow.add_node("workflow_init", workflow_trigger)
+workflow.add_node("list_tables_in_database_tool_call", ToolNode([list_tables_tool]))
 
 #-----------------------------------------------------------------------------------------------
 
-def first(state: State) -> dict[str, list[AIMessage]]:
-    #return wrap_tool_call(list_tables_tool, state)
-    prompt = """You are a SQL expert with a strong attention to detail.
-        Use the provided tool to extract the list of tables in the database.
+def extract_table_schema(state: State) -> dict[str, list[AIMessage]]:
     """
-    return call_model(prompt, {"sql_db_list_tables": list_tables_tool}, state)
-
-workflow.add_node("first_tool_call", first)
-
-#-----------------------------------------------------------------------------------------------
-
-def second(state: State) -> dict[str, list[AIMessage]]:
-    #return wrap_tool_call(get_schema_tool, {"table_names": state["messages"][-1].content})
-    prompt = """You are a SQL expert with a strong attention to detail.
         Take the tools to extract the schema and table information from the database.
     """
-    return call_model(prompt, {"sql_db_schema": get_schema_tool}, state)
+    get_schema = llm.bind_tools([get_schema_tool], tool_choice="required") 
+    return {"messages": [get_schema.invoke(state["messages"])]}
 
-workflow.add_node("second_tool_call", second)
+workflow.add_node("extract_table_schema", extract_table_schema)
+workflow.add_node("get_schema_tool_call", ToolNode([get_schema_tool]))
 
 #-----------------------------------------------------------------------------------------------
 
-def query_gen_node(state: State):
-    query_gen_system = """You are a SQL expert with a strong attention to detail.
+def query_gen_node(state: State) -> dict[str, list[AIMessage]]:
+    prompt = """You are a SQL expert with a strong attention to detail.
 
-    Given an input question, output a syntactically correct SQL Server query.
+    Given an input, output a syntactically correct SQL Server query.
+
+    {input}
 
     When generating the query:
 
@@ -263,7 +199,11 @@ def query_gen_node(state: State):
 
     DO NOT make any DML statements (CREATE, INSERT, UPDATE, DELETE, DROP etc.) to the database."""
 
-    return call_model(query_gen_system, {}, state)
+    prompt_template = ChatPromptTemplate.from_messages(
+        [("system", prompt), ("placeholder", "{input}")]
+    )
+    call = prompt_template | llm
+    return {"messages": [call.invoke({"input": state["messages"]})]}
 
 
 workflow.add_node("query_gen", query_gen_node)
@@ -275,8 +215,8 @@ def model_check_query(state: State) -> dict[str, list[AIMessage]]:
     Use this tool to double-check if your query is correct before executing it.
     """
 
-    query_check_system = """You are a SQL expert with a strong attention to detail.
-    Double check the SQL Server query for common mistakes, including:
+    prompt = """You are a SQL expert with a strong attention to detail.
+    Double check the SQL Server query given as input for common mistakes, including:
     - Using NOT IN with NULL values
     - Using UNION when UNION ALL should have been used
     - Using BETWEEN for exclusive ranges
@@ -287,28 +227,25 @@ def model_check_query(state: State) -> dict[str, list[AIMessage]]:
     - Using the proper columns for joins
     - Not using any create or drop statements
 
-    If there are any of the above mistakes, rewrite the query. If there are no mistakes, just reproduce the original query.
+    Query: {input}
 
-    You will call the appropriate tool to execute the query after running this check."""
+    If there are any of the above mistakes, rewrite the query. If there are no mistakes, 
+    return the correct query."""
 
-    query_check_prompt = ChatPromptTemplate.from_messages(
-        [("system", query_check_system), ("placeholder", "{messages}")]
+    prompt_template = ChatPromptTemplate.from_messages(
+        [("system", prompt), ("placeholder", "{input}")]
     )
-    query_check = query_check_prompt | llm.bind_tools(
-        [db_query_tool], tool_choice="required"
-    )
-    return {"messages": [query_check.invoke({"messages": [state["messages"][-1]]})]}
+    call = prompt_template | llm.bind_tools([db_query_tool], tool_choice="required")
+    return {"messages": [call.invoke({"input": [state["messages"][-1]]})]}
 
 # Add a node for the model to check the query before executing it
-workflow.add_node("correct_query", model_check_query)
-
-# Add node for executing the query
-workflow.add_node("execute_query", create_tool_node_with_fallback([db_query_tool]))
+workflow.add_node("correct_and_execute_query", model_check_query)
+workflow.add_node("sql_query_tool", ToolNode([db_query_tool]))
 
 #-----------------------------------------------------------------------------------------------
 
 def format_gen_node(state: State):
-    format_system = """
+    prompt = """
     You receive an unformatted input message and need to format it into a human readable, meaningful response.
 
     If the input message contains tabular data, you should format it into a table. 
@@ -317,12 +254,11 @@ def format_gen_node(state: State):
     ---
     {input}
     """
-    format_prompt = ChatPromptTemplate.from_messages(
-        [("system", format_system), ("placeholder", "{input}")]
+    prompt_template = ChatPromptTemplate.from_messages(
+        [("system", prompt), ("placeholder", "{input}")]
     )
-    format_gen = format_prompt | llm
-
-    return {"messages": [format_gen.invoke({"input": [state["messages"][-1].content]})]}
+    call = prompt_template | llm
+    return {"messages": [call.invoke({"input": [state["messages"][-1].content]})]}
 
 workflow.add_node("format_gen", format_gen_node)
 
@@ -339,14 +275,15 @@ def should_continue(state: State) -> Literal["format_gen", "query_gen"]:
 
 
 # Specify the edges between the nodes
-workflow.add_edge(START, "first_tool_call")
-workflow.add_edge("first_tool_call", "second_tool_call")
-#workflow.add_edge("first_tool_call", "query_gen")
-workflow.add_edge("second_tool_call", "query_gen")
-workflow.add_edge("query_gen", "correct_query")
-workflow.add_edge("correct_query", "execute_query")
+workflow.add_edge(START, "workflow_init")
+workflow.add_edge("workflow_init", "list_tables_in_database_tool_call")
+workflow.add_edge("list_tables_in_database_tool_call", "extract_table_schema")
+workflow.add_edge("extract_table_schema", "get_schema_tool_call")
+workflow.add_edge("get_schema_tool_call", "query_gen")
+workflow.add_edge("query_gen", "correct_and_execute_query")
+workflow.add_edge("correct_and_execute_query", "sql_query_tool")
 workflow.add_conditional_edges(
-    "execute_query",
+    "sql_query_tool",
     should_continue,
 )
 workflow.add_edge("format_gen", END)
