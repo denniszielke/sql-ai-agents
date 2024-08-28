@@ -16,3 +16,4 @@ langgraph==0.2.5
 sqlalchemy==2.0.32
 pyodbc==5.1.0
 ipython==8.26.0
+tiktoken==0.7.0
