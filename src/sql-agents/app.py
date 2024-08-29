@@ -162,11 +162,16 @@ def query_gen_node(state: State) -> dict[str, list[AIMessage]]:
     Given an input, retrieve all required schema information from the database to answer the question. 
     Use the ONLY the tools provided, to extract the schema information from the database.
 
-    Input Data: {input}
+    Use the following flow to fetch the neccessary information:
+    1. Fetch the table names from the database
+    2. Select potential candidates for relevant tables from the results of step 1
+    3. Fetch the table schema from the database
+    4. Reduce the schema to only include columns that are required to answer the users question
 
-    When generating the results, reduce the output to only contain relevant information for the query.
-    This means you are allowed to remove any columns that are not needed for the query from the schema. If 
-    the schema is no fit at all, try again with a different schema. And do not output any data that is not."""
+    ---
+    Input Data: {input}
+    ---
+    """
 
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompt), ("placeholder", "{input}")]
@@ -184,9 +189,11 @@ workflow.add_node("sql_tools", ToolNode(sql_schema_tools))
 def query_compiler(state: State) -> dict[str, list[AIMessage]]:
     prompt = """You are a SQL expert with a strong attention to detail.
 
-    Given an input, output a syntactically correct SQL Server query.
+    Given input data, output a syntactically correct SQL Server query to answer the users question.
 
-    {input}
+    ---
+    Input Data: {input}
+    ---
 
     When generating the query:
 
@@ -194,9 +201,8 @@ def query_compiler(state: State) -> dict[str, list[AIMessage]]:
     You can order the results by a relevant column to return the most interesting examples in the database.
     Never query for all the columns from a specific table, only ask for the relevant columns given the question.
 
-    If you have enough information to answer the input question, simply invoke the appropriate tool to submit the final answer to the user.
-
-    DO NOT make any DML statements (CREATE, INSERT, UPDATE, DELETE, DROP etc.) to the database."""
+    DO NOT make any DML statements (CREATE, INSERT, UPDATE, DELETE, DROP etc.) to the database.
+    """
 
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompt), ("placeholder", "{input}")]
@@ -209,20 +215,15 @@ workflow.add_node("query_compiler", query_compiler)
 
 def query_check(state: State) -> dict[str, list[AIMessage]]:
     prompt = """You are a SQL expert with a strong attention to detail.
-    Double check the SQL Server query given as input for common mistakes, including:
-    - Using NOT IN with NULL values
-    - Using UNION when UNION ALL should have been used
-    - Using BETWEEN for exclusive ranges
-    - Data type mismatch in predicates
-    - Properly quoting identifiers
-    - Using the correct number of arguments for functions
-    - Casting to the correct data type
-    - Using the proper columns for joins
-    - Not using any create, insert, delete or drop statements
+    Double check the SQL Server query given as input for common mistakes.
+    Make sure that the query does not include any altering commands like DROP, INSERT, DELETE, etc.
+    If it does, return a final message immediatly, stating the problem. Prefix the message with "STOP:".
 
+    ---
     Query: {input}
+    ---
 
-    If there are any of the above mistakes, rewrite the query. And output the changes. If there are no mistakes, 
+    If there are mistakes, rewrite the query and output the changes. If there are no mistakes, 
     run the query via the tool. In that case, do not output the query again."""
 
     prompt_template = ChatPromptTemplate.from_messages(
@@ -265,11 +266,13 @@ def should_continue(state: State) -> Literal["sql_tools", "query_compiler"]:
     else:
         return "query_compiler"
     
-def should_continue2(state: State) -> Literal["format_gen", "query_compiler"]:
+def should_continue2(state: State) -> Literal["__end__", "format_gen", "query_compiler"]:
     messages = state["messages"]
     last_message = messages[-1]
     if last_message.content.startswith("Error:"):
         return "query_compiler"
+    else if last_message.content.startswith("STOP:"):
+        return "__end__"
     else:
         return "format_gen"
 
@@ -282,6 +285,7 @@ workflow.add_conditional_edges(
 )
 workflow.add_edge("query_compiler", "correct_and_execute_query")
 workflow.add_edge("correct_and_execute_query", "db_query_tool")
+workflow.add_edge("correct_and_execute_query", END)
 workflow.add_conditional_edges(
     "db_query_tool",
     should_continue2, # -> format_gen
