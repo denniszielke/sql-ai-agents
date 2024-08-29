@@ -154,35 +154,34 @@ class State(TypedDict):
 workflow = StateGraph(State)
 
 #-----------------------------------------------------------------------------------------------
-
-def workflow_trigger(state: State) -> dict[str, list[AIMessage]]:
-    return {
-        "messages": [
-            AIMessage(
-                content="",
-                tool_calls=[{"id":"tool_sql_db_list_tables", "name": "sql_db_list_tables", "args": {}}]
-            )
-        ]
-    }
-
-workflow.add_node("workflow_init", workflow_trigger)
-workflow.add_node("list_tables_in_database_tool_call", ToolNode([list_tables_tool]))
-
-#-----------------------------------------------------------------------------------------------
-
-def extract_table_schema(state: State) -> dict[str, list[AIMessage]]:
-    """
-        Take the tools to extract the schema and table information from the database.
-    """
-    get_schema = llm.bind_tools([get_schema_tool], tool_choice="required") 
-    return {"messages": [get_schema.invoke(state["messages"])]}
-
-workflow.add_node("extract_table_schema", extract_table_schema)
-workflow.add_node("get_schema_tool_call", ToolNode([get_schema_tool]))
-
-#-----------------------------------------------------------------------------------------------
-
+sql_schema_tools = [list_tables_tool, get_schema_tool]
+#give me the last dates customer where contacted
 def query_gen_node(state: State) -> dict[str, list[AIMessage]]:
+    prompt = """You are a SQL expert with a strong attention to detail.
+
+    Given an input, retrieve all required schema information from the database to answer the question. 
+    Use the ONLY the tools provided, to extract the schema information from the database.
+
+    Input Data: {input}
+
+    When generating the results, reduce the output to only contain relevant information for the query.
+    This means you are allowed to remove any columns that are not needed for the query from the schema. If 
+    the schema is no fit at all, try again with a different schema. And do not output any data that is not."""
+
+    prompt_template = ChatPromptTemplate.from_messages(
+        [("system", prompt), ("placeholder", "{input}")]
+    )
+    call = prompt_template | llm.bind_tools(sql_schema_tools, tool_choice="auto")
+    message = call.invoke({"input": state["messages"]})
+    return {"messages": [message]}
+
+
+workflow.add_node("query_gen", query_gen_node)
+workflow.add_node("sql_tools", ToolNode(sql_schema_tools))
+
+#-----------------------------------------------------------------------------------------------
+
+def query_compiler(state: State) -> dict[str, list[AIMessage]]:
     prompt = """You are a SQL expert with a strong attention to detail.
 
     Given an input, output a syntactically correct SQL Server query.
@@ -206,15 +205,9 @@ def query_gen_node(state: State) -> dict[str, list[AIMessage]]:
     return {"messages": [call.invoke({"input": state["messages"]})]}
 
 
-workflow.add_node("query_gen", query_gen_node)
+workflow.add_node("query_compiler", query_compiler)
 
-#-----------------------------------------------------------------------------------------------
-
-def model_check_query(state: State) -> dict[str, list[AIMessage]]:
-    """
-    Use this tool to double-check if your query is correct before executing it.
-    """
-
+def query_check(state: State) -> dict[str, list[AIMessage]]:
     prompt = """You are a SQL expert with a strong attention to detail.
     Double check the SQL Server query given as input for common mistakes, including:
     - Using NOT IN with NULL values
@@ -225,12 +218,12 @@ def model_check_query(state: State) -> dict[str, list[AIMessage]]:
     - Using the correct number of arguments for functions
     - Casting to the correct data type
     - Using the proper columns for joins
-    - Not using any create or drop statements
+    - Not using any create, insert, delete or drop statements
 
     Query: {input}
 
-    If there are any of the above mistakes, rewrite the query. If there are no mistakes, 
-    return the correct query."""
+    If there are any of the above mistakes, rewrite the query. And output the changes. If there are no mistakes, 
+    run the query via the tool. In that case, do not output the query again."""
 
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompt), ("placeholder", "{input}")]
@@ -238,9 +231,8 @@ def model_check_query(state: State) -> dict[str, list[AIMessage]]:
     call = prompt_template | llm.bind_tools([db_query_tool], tool_choice="required")
     return {"messages": [call.invoke({"input": [state["messages"][-1]]})]}
 
-# Add a node for the model to check the query before executing it
-workflow.add_node("correct_and_execute_query", model_check_query)
-workflow.add_node("sql_query_tool", ToolNode([db_query_tool]))
+workflow.add_node("correct_and_execute_query", query_check)
+workflow.add_node("db_query_tool", ToolNode([db_query_tool]))
 
 #-----------------------------------------------------------------------------------------------
 
@@ -265,31 +257,43 @@ workflow.add_node("format_gen", format_gen_node)
 #-----------------------------------------------------------------------------------------------
 
 # Define a conditional edge to decide whether to continue or end the workflow
-def should_continue(state: State) -> Literal["format_gen", "query_gen"]:
+def should_continue(state: State) -> Literal["sql_tools", "query_compiler"]:
+    messages = state["messages"]
+    last_message = messages[-1]
+    if last_message.tool_calls:
+        return "sql_tools"
+    else:
+        return "query_compiler"
+    
+def should_continue2(state: State) -> Literal["format_gen", "query_compiler"]:
     messages = state["messages"]
     last_message = messages[-1]
     if last_message.content.startswith("Error:"):
-        return "query_gen"
+        return "query_compiler"
     else:
         return "format_gen"
 
-
 # Specify the edges between the nodes
-workflow.add_edge(START, "workflow_init")
-workflow.add_edge("workflow_init", "list_tables_in_database_tool_call")
-workflow.add_edge("list_tables_in_database_tool_call", "extract_table_schema")
-workflow.add_edge("extract_table_schema", "get_schema_tool_call")
-workflow.add_edge("get_schema_tool_call", "query_gen")
-workflow.add_edge("query_gen", "correct_and_execute_query")
-workflow.add_edge("correct_and_execute_query", "sql_query_tool")
+workflow.add_edge(START, "query_gen")
+workflow.add_edge("sql_tools", "query_gen")
 workflow.add_conditional_edges(
-    "sql_query_tool",
-    should_continue,
+    "query_gen",
+    should_continue, # -> correct_and_execute_query
+)
+workflow.add_edge("query_compiler", "correct_and_execute_query")
+workflow.add_edge("correct_and_execute_query", "db_query_tool")
+workflow.add_conditional_edges(
+    "db_query_tool",
+    should_continue2, # -> format_gen
 )
 workflow.add_edge("format_gen", END)
 
 app = workflow.compile()
-
+st.image(
+            app.get_graph(xray=True).draw_mermaid_png(
+                draw_method=MermaidDrawMethod.API,
+            )
+        )
 human_query = st.chat_input()
 
 if human_query is not None and human_query != "":
@@ -324,8 +328,8 @@ if human_query is not None and human_query != "":
                 
                 if ( isinstance(message, ToolMessage) ):
                     print("Tool:", message.content)
-                    with st.chat_message("Tool"):
-                        st.write(message.content.replace('\n\n', ''))
+                   # with st.chat_message("Tool"):
+                        #st.write(message.content.replace('\n\n', ''))
 
         st.write("The conversation has ended. Those were the steps taken to answer your query.")
         st.write("The total number of tokens used in this conversation was: ", callback.completion_tokens + callback.prompt_tokens)
