@@ -160,7 +160,8 @@ def query_gen_node(state: State) -> dict[str, list[AIMessage]]:
     prompt = """You are a SQL expert with a strong attention to detail.
 
     Given an input, retrieve all required schema information from the database to answer the question. 
-    Use the ONLY the tools provided, to extract the schema information from the database.
+    Use the ONLY the tools provided, to extract the schema information from the database. 
+    DO NOT write any SQL queries to answer the users question.
 
     Use the following flow to fetch the neccessary information:
     1. Fetch the table names from the database
@@ -257,6 +258,8 @@ workflow.add_node("format_gen", format_gen_node)
 
 #-----------------------------------------------------------------------------------------------
 
+def conditional_routing(state: State) -> Literal["sql_tools", "query_compiler"]:
+
 # Define a conditional edge to decide whether to continue or end the workflow
 def should_continue(state: State) -> Literal["sql_tools", "query_compiler"]:
     messages = state["messages"]
@@ -271,7 +274,7 @@ def should_continue2(state: State) -> Literal["__end__", "format_gen", "query_co
     last_message = messages[-1]
     if last_message.content.startswith("Error:"):
         return "query_compiler"
-    else if last_message.content.startswith("STOP:"):
+    elif last_message.content.startswith("STOP:"):
         return "__end__"
     else:
         return "format_gen"
