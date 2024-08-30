@@ -91,11 +91,12 @@ class TokenCounterCallback(BaseCallbackHandler):
     def on_llm_new_token(self, token: str, **kwargs: Any) -> Any:
         self.completion_tokens += 1
 
-    def on_chat_model_start(self, serialized: Dict[str, Any], messages: List[List[BaseMessage]], **kwargs: Any) -> Any:
-        self.prompt_tokens += num_tokens_from_messages( [message.content for message in messages[0]])
-         
-
 callback = TokenCounterCallback()
+
+def measure_prompt_tokens(messages: List[BaseMessage]) -> List[BaseMessage]:
+    for message in messages:
+        callback.prompt_tokens += num_tokens_from_messages([message.content])
+    return messages
 
 llm: AzureChatOpenAI = None
 if "AZURE_OPENAI_API_KEY" in os.environ:
@@ -163,6 +164,7 @@ def query_gen_node(state: State) -> dict[str, list[AIMessage]]:
     If the users question requires a DML statement, return a final message stating the problem. Prefix the message with "Error:".
 
     Given an input, retrieve all required schema information from the database to answer the question. 
+    Filter the schema to only include the necessary columns. Be as short as possible.
     Use the ONLY the tools provided, to extract the schema information from the database. 
     DO NOT write any SQL queries to answer the users question.
 
@@ -181,7 +183,7 @@ def query_gen_node(state: State) -> dict[str, list[AIMessage]]:
         [("system", prompt), ("placeholder", "{input}")]
     )
     call = prompt_template | llm.bind_tools(sql_schema_tools, tool_choice="auto")
-    message = call.invoke({"input": state["messages"]})
+    message = call.invoke({"input": measure_prompt_tokens(state["messages"])})
     return {"messages": [message]}
 
 
@@ -212,14 +214,23 @@ def query_compiler(state: State) -> dict[str, list[AIMessage]]:
         [("system", prompt), ("placeholder", "{input}")]
     )
     call = prompt_template | llm
-    return {"messages": [call.invoke({"input": state["messages"]})]}
+    return {"messages": [call.invoke({"input": measure_prompt_tokens(state["messages"])})]}
 
 
 workflow.add_node("query_compiler", query_compiler)
 
 def query_check(state: State) -> dict[str, list[AIMessage]]:
     prompt = """You are a SQL expert with a strong attention to detail.
-    Double check the SQL Server query given as input for common mistakes.
+    Double check the SQL Server query given as input for common mistakes, including:
+    - Using NOT IN with NULL values
+    - Using UNION when UNION ALL should have been used
+    - Using BETWEEN for exclusive ranges
+    - Data type mismatch in predicates
+    - Properly quoting identifiers
+    - Using the correct number of arguments for functions
+    - Casting to the correct data type
+    - Using the proper columns for joins
+    - Not using any create or drop statements
 
     ---
     Query: {input}
@@ -232,7 +243,7 @@ def query_check(state: State) -> dict[str, list[AIMessage]]:
         [("system", prompt), ("placeholder", "{input}")]
     )
     call = prompt_template | llm.bind_tools([db_query_tool], tool_choice="required")
-    return {"messages": [call.invoke({"input": [state["messages"][-1]]})]}
+    return {"messages": [call.invoke({"input": measure_prompt_tokens([state["messages"][-1]])})]}
 
 workflow.add_node("correct_and_execute_query", query_check)
 workflow.add_node("db_query_tool", ToolNode([db_query_tool]))
@@ -253,7 +264,8 @@ def format_gen_node(state: State):
         [("system", prompt), ("placeholder", "{input}")]
     )
     call = prompt_template | llm
-    return {"messages": [call.invoke({"input": [state["messages"][-1].content]})]}
+    message = measure_prompt_tokens([state["messages"][-1]])[-1]
+    return {"messages": [call.invoke({"input": [message.content]})]}
 
 workflow.add_node("format_gen", format_gen_node)
 

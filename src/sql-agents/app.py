@@ -90,12 +90,13 @@ class TokenCounterCallback(BaseCallbackHandler):
 
     def on_llm_new_token(self, token: str, **kwargs: Any) -> Any:
         self.completion_tokens += 1
-
-    def on_chat_model_start(self, serialized: Dict[str, Any], messages: List[List[BaseMessage]], **kwargs: Any) -> Any:
-        self.prompt_tokens += num_tokens_from_messages( [message.content for message in messages[0]])
          
-
 callback = TokenCounterCallback()
+
+def measure_prompt_tokens(messages: List[BaseMessage]) -> List[BaseMessage]:
+    for message in messages:
+        callback.prompt_tokens += num_tokens_from_messages([message.content])
+    return messages
 
 llm: AzureChatOpenAI = None
 if "AZURE_OPENAI_API_KEY" in os.environ:
@@ -175,7 +176,7 @@ def extract_table_schema(state: State) -> dict[str, list[AIMessage]]:
         Take the tools to extract the schema and table information from the database.
     """
     get_schema = llm.bind_tools([get_schema_tool], tool_choice="required") 
-    return {"messages": [get_schema.invoke(state["messages"])]}
+    return {"messages": [get_schema.invoke(measure_prompt_tokens(state["messages"]))]}
 
 workflow.add_node("extract_table_schema", extract_table_schema)
 workflow.add_node("get_schema_tool_call", ToolNode([get_schema_tool]))
@@ -203,7 +204,7 @@ def query_gen_node(state: State) -> dict[str, list[AIMessage]]:
         [("system", prompt), ("placeholder", "{input}")]
     )
     call = prompt_template | llm
-    return {"messages": [call.invoke({"input": state["messages"]})]}
+    return {"messages": [call.invoke({"input": measure_prompt_tokens(state["messages"])})]}
 
 
 workflow.add_node("query_gen", query_gen_node)
@@ -236,7 +237,7 @@ def model_check_query(state: State) -> dict[str, list[AIMessage]]:
         [("system", prompt), ("placeholder", "{input}")]
     )
     call = prompt_template | llm.bind_tools([db_query_tool], tool_choice="required")
-    return {"messages": [call.invoke({"input": [state["messages"][-1]]})]}
+    return {"messages": [call.invoke({"input": measure_prompt_tokens([state["messages"][-1]])})]}
 
 # Add a node for the model to check the query before executing it
 workflow.add_node("correct_and_execute_query", model_check_query)
@@ -258,7 +259,8 @@ def format_gen_node(state: State):
         [("system", prompt), ("placeholder", "{input}")]
     )
     call = prompt_template | llm
-    return {"messages": [call.invoke({"input": [state["messages"][-1].content]})]}
+    message = measure_prompt_tokens([state["messages"][-1]])[-1]
+    return {"messages": [call.invoke({"input": [message.content]})]}
 
 workflow.add_node("format_gen", format_gen_node)
 
