@@ -135,6 +135,15 @@ tools = toolkit.get_tools()
 list_tables_tool = next(tool for tool in tools if tool.name == "sql_db_list_tables")
 get_schema_tool = next(tool for tool in tools if tool.name == "sql_db_schema")
 
+# Define the state for the agent
+class State(TypedDict):
+    messages: Annotated[list[AnyMessage], add_messages]
+
+# Define a new graph
+workflow = StateGraph(State)
+
+#-----------------------------------------------------------------------------------------------
+
 @tool
 def db_query_tool(query: str) -> str:
     """
@@ -147,18 +156,15 @@ def db_query_tool(query: str) -> str:
         return "Error: Query failed. Please rewrite your query and try again."
     return result
 
-# Define the state for the agent
-class State(TypedDict):
-    messages: Annotated[list[AnyMessage], add_messages]
-
-# Define a new graph
-workflow = StateGraph(State)
-
 #-----------------------------------------------------------------------------------------------
+
 sql_schema_tools = [list_tables_tool, get_schema_tool]
-#give me the last dates customer where contacted
-def query_gen_node(state: State) -> dict[str, list[AIMessage]]:
+
+def query_compiler(state: State) -> dict[str, list[AIMessage]]:
     prompt = """You are a SQL expert with a strong attention to detail.
+
+    Your task is to output a syntactically correct SQL Server query to answer the users question. 
+    You answer is based on data you retrieve from your provide tools and your input.
 
     Warning: Make sure, that the user does not want you to make any DML statements (CREATE, INSERT, UPDATE, DELETE, DROP etc.) to the database. 
     If the users question requires a DML statement, return a final message stating the problem. Prefix the message with "Error:".
@@ -168,40 +174,17 @@ def query_gen_node(state: State) -> dict[str, list[AIMessage]]:
     Use the ONLY the tools provided, to extract the schema information from the database. 
     DO NOT write any SQL queries to answer the users question.
 
-    Use the following flow to fetch the neccessary information:
-    1. Fetch the table names from the database
-    2. Select potential candidates for relevant tables from the results of step 1
-    3. Fetch the table schema from the database
-    4. Reduce the schema to only include columns that are required to answer the users question
-
-    ---
-    Input Data: {input}
-    ---
-    """
-
-    prompt_template = ChatPromptTemplate.from_messages(
-        [("system", prompt), ("placeholder", "{input}")]
-    )
-    call = prompt_template | llm.bind_tools(sql_schema_tools, tool_choice="auto")
-    message = call.invoke({"input": measure_prompt_tokens(state["messages"])})
-    return {"messages": [message]}
-
-
-workflow.add_node("query_gen", query_gen_node)
-workflow.add_node("sql_tools", ToolNode(sql_schema_tools))
-
-#-----------------------------------------------------------------------------------------------
-
-def query_compiler(state: State) -> dict[str, list[AIMessage]]:
-    prompt = """You are a SQL expert with a strong attention to detail.
-
-    Given input data, output a syntactically correct SQL Server query to answer the users question.
-
     ---
     Input Data: {input}
     ---
 
     When generating the query:
+
+    Use the following flow to fetch the neccessary information:
+    1. Fetch the table names from the database
+    2. Select potential candidates for relevant tables from the results of step 1
+    3. Fetch the table schema from the database
+    4. Reduce the schema to only include columns that are required to answer the users question
 
     Unless the user specifies a specific number of examples they wish to obtain, always limit your query to at most 5 results.
     You can order the results by a relevant column to return the most interesting examples in the database.
@@ -213,11 +196,14 @@ def query_compiler(state: State) -> dict[str, list[AIMessage]]:
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompt), ("placeholder", "{input}")]
     )
-    call = prompt_template | llm
+    call = prompt_template | llm.bind_tools(sql_schema_tools, tool_choice="auto")
     return {"messages": [call.invoke({"input": measure_prompt_tokens(state["messages"])})]}
 
 
 workflow.add_node("query_compiler", query_compiler)
+workflow.add_node("sql_tools", ToolNode(sql_schema_tools))
+
+#-----------------------------------------------------------------------------------------------
 
 def query_check(state: State) -> dict[str, list[AIMessage]]:
     prompt = """You are a SQL expert with a strong attention to detail.
@@ -271,7 +257,7 @@ workflow.add_node("format_gen", format_gen_node)
 
 #-----------------------------------------------------------------------------------------------
 
-def should_continue(state: State) -> Literal["__end__", "sql_tools", "query_compiler"]:
+def should_continue(state: State) -> Literal["__end__", "sql_tools", "correct_and_execute_query"]:
     messages = state["messages"]
     last_message = messages[-1]
     if last_message.content.startswith("Error:"):
@@ -279,7 +265,7 @@ def should_continue(state: State) -> Literal["__end__", "sql_tools", "query_comp
     elif last_message.tool_calls:
         return "sql_tools"
     else:
-        return "query_compiler"
+        return "correct_and_execute_query"
     
 def should_continue2(state: State) -> Literal["format_gen", "query_compiler"]:
     messages = state["messages"]
@@ -290,13 +276,12 @@ def should_continue2(state: State) -> Literal["format_gen", "query_compiler"]:
         return "format_gen"
 
 # Specify the edges between the nodes
-workflow.add_edge(START, "query_gen")
-workflow.add_edge("sql_tools", "query_gen")
+workflow.add_edge(START, "query_compiler")
+workflow.add_edge("sql_tools", "query_compiler")
 workflow.add_conditional_edges(
-    "query_gen",
+    "query_compiler",
     should_continue, # -> correct_and_execute_query
 )
-workflow.add_edge("query_compiler", "correct_and_execute_query")
 workflow.add_edge("correct_and_execute_query", "db_query_tool")
 workflow.add_conditional_edges(
     "db_query_tool",
@@ -305,11 +290,7 @@ workflow.add_conditional_edges(
 workflow.add_edge("format_gen", END)
 
 app = workflow.compile()
-st.image(
-            app.get_graph(xray=True).draw_mermaid_png(
-                draw_method=MermaidDrawMethod.API,
-            )
-        )
+
 human_query = st.chat_input()
 
 if human_query is not None and human_query != "":
