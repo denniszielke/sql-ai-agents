@@ -1,3 +1,4 @@
+import ast
 import os
 import random
 from typing import Any, Dict, List, Literal, Annotated, TypedDict
@@ -132,9 +133,6 @@ db = SQLDatabase.from_uri(odbc_str)
 toolkit = SQLDatabaseToolkit(db=db, llm=llm)
 tools = toolkit.get_tools()
 
-list_tables_tool = next(tool for tool in tools if tool.name == "sql_db_list_tables")
-get_schema_tool = next(tool for tool in tools if tool.name == "sql_db_schema")
-
 # Define the state for the agent
 class State(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
@@ -153,7 +151,7 @@ def db_query_tool(query: str) -> str:
     """
     result = db.run_no_throw(query)
     if not result:
-        return "Error: Query failed. Please rewrite your query and try again."
+        return "[]"
     return result
 
 @tool
@@ -166,9 +164,27 @@ def glossary_tool(query: str) -> str:
     result = db_query_tool("SELECT * FROM dbo.SAP_Column_Descriptions")
     return result
 
+@tool
+def db_schema_tool(fields: List[str]) -> Dict[str, List[Dict[str, str]]]:
+    """
+    Returns the schema information of the database for the given fields. Returns only relevant information,
+    such as the table name, column name, and data type. It does not return the data as sql.
+    """
+    #query = "SELECT table_schema, table_name, column_name, data_type FROM INFORMATION_SCHEMA.columns WHERE table_schema='dbo' AND column_name IN ({})".format(", ".join(fields))
+    query = "SELECT table_schema, table_name, column_name, data_type FROM INFORMATION_SCHEMA.columns WHERE table_schema='dbo' AND column_name LIKE '%{}%'".format("%' OR column_name LIKE '%".join(fields))
+
+    result = db_query_tool(query)
+    list_of_tuples = ast.literal_eval(result)
+    result_dict = {}
+    for schema, table, column, data_type in list_of_tuples:
+        if (table) not in result_dict:
+            result_dict[(table)] = []
+        result_dict[(table)].append({"column": column, "data_type": data_type})
+    return result_dict
+
 #-----------------------------------------------------------------------------------------------
 
-sql_schema_tools = [list_tables_tool, get_schema_tool, glossary_tool]
+sql_schema_tools = [db_schema_tool, glossary_tool]
 
 def query_compiler(state: State) -> dict[str, list[AIMessage]]:
     prompt = """You are a SQL expert with a strong attention to detail.
@@ -192,10 +208,7 @@ def query_compiler(state: State) -> dict[str, list[AIMessage]]:
 
     Use the following flow to fetch the neccessary information:
     1. Fetch the glossary from the database
-    2. Fetch the table names from the database
-    3. Select potential candidates for relevant tables from the results of step 1
-    4. Fetch the table schema from the database
-    5. Reduce the schema to only include columns that are required to answer the users question
+    2. Fetch the table schema from the database using the relevant, filtered columns from the glossary
 
     Unless the user specifies a specific number of examples they wish to obtain, always limit your query to at most 5 results.
     You can order the results by a relevant column to return the most interesting examples in the database.
@@ -228,6 +241,7 @@ def query_check(state: State) -> dict[str, list[AIMessage]]:
     - Casting to the correct data type
     - Using the proper columns for joins
     - Not using any create or drop statements
+    - Use cast or convert methods to bring date string into the correct data type
 
     ---
     Query: {input}
