@@ -156,9 +156,19 @@ def db_query_tool(query: str) -> str:
         return "Error: Query failed. Please rewrite your query and try again."
     return result
 
+@tool
+def glossary_tool(query: str) -> str:
+    """
+    Execute a SQL Server query against the database and get back the result.
+    The query retrieves the glossary of the database.
+    The glossary contains the description for each column in the database.
+    """
+    result = db_query_tool("SELECT * FROM dbo.SAP_Column_Descriptions")
+    return result
+
 #-----------------------------------------------------------------------------------------------
 
-sql_schema_tools = [list_tables_tool, get_schema_tool]
+sql_schema_tools = [list_tables_tool, get_schema_tool, glossary_tool]
 
 def query_compiler(state: State) -> dict[str, list[AIMessage]]:
     prompt = """You are a SQL expert with a strong attention to detail.
@@ -181,10 +191,11 @@ def query_compiler(state: State) -> dict[str, list[AIMessage]]:
     When generating the query:
 
     Use the following flow to fetch the neccessary information:
-    1. Fetch the table names from the database
-    2. Select potential candidates for relevant tables from the results of step 1
-    3. Fetch the table schema from the database
-    4. Reduce the schema to only include columns that are required to answer the users question
+    1. Fetch the glossary from the database
+    2. Fetch the table names from the database
+    3. Select potential candidates for relevant tables from the results of step 1
+    4. Fetch the table schema from the database
+    5. Reduce the schema to only include columns that are required to answer the users question
 
     Unless the user specifies a specific number of examples they wish to obtain, always limit your query to at most 5 results.
     You can order the results by a relevant column to return the most interesting examples in the database.
