@@ -36,7 +36,7 @@ var tags = { 'azd-env-name': environmentName, 'app': 'ai-agents', 'tracing': 'ye
 
 param completionDeploymentModelName string = 'gpt-4o'
 param completionModelName string = 'gpt-4o'
-param completionModelVersion string = '2024-05-13'
+param completionModelVersion string = '2024-08-06'
 param embeddingDeploymentModelName string = 'text-embedding-ada-002'
 param embeddingModelName string = 'text-embedding-ada-002'
 param openaiApiVersion string = '2024-02-01'
