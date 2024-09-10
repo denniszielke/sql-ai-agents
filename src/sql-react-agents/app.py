@@ -4,7 +4,7 @@ import random
 from typing import Any, Dict, List, Literal, Annotated, TypedDict
 
 import dotenv
-from langchain_openai import AzureChatOpenAI
+from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 import streamlit as st
 import tiktoken
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
@@ -31,6 +31,9 @@ from opentelemetry.instrumentation.langchain import LangchainInstrumentor
 from opentelemetry.sdk import trace as trace_sdk
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
+import hashlib
+from langchain_core.documents import Document
+from langchain_community.vectorstores.azuresearch import AzureSearch
 
 dotenv.load_dotenv()
 
@@ -110,6 +113,13 @@ if "AZURE_OPENAI_API_KEY" in os.environ:
         streaming=True,
         callbacks=[callback]
     )
+    embeddings_model = AzureOpenAIEmbeddings(    
+        azure_deployment = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME"),
+        openai_api_version = os.getenv("AZURE_OPENAI_VERSION"),
+        model= os.getenv("AZURE_OPENAI_EMBEDDING_MODEL"),
+        api_key=os.getenv("AZURE_OPENAI_API_KEY")
+    )
+
 else:
     token_provider = get_bearer_token_provider(DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default")
     llm = AzureChatOpenAI(
@@ -122,6 +132,12 @@ else:
         streaming=True,
         callbacks=[callback]
     )
+    embeddings_model = AzureOpenAIEmbeddings(    
+        azure_deployment = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME"),
+        openai_api_version = os.getenv("AZURE_OPENAI_VERSION"),
+        model= os.getenv("AZURE_OPENAI_EMBEDDING_MODEL"),
+        azure_ad_token_provider = token_provider
+    )
 
 driver = '{ODBC Driver 18 for SQL Server}'
 odbc_str = 'mssql+pyodbc:///?odbc_connect=' \
@@ -130,8 +146,17 @@ odbc_str = 'mssql+pyodbc:///?odbc_connect=' \
 
 db = SQLDatabase.from_uri(odbc_str)
 
-toolkit = SQLDatabaseToolkit(db=db, llm=llm)
-tools = toolkit.get_tools()
+@st.cache_resource
+def create_search_index() -> AzureSearch:
+    index_name: str = "sql-server-index"
+    return AzureSearch(
+        azure_search_endpoint=os.getenv("AZURE_AI_SEARCH_ENDPOINT"),
+        azure_search_key=os.getenv("AZURE_AI_SEARCH_KEY"),
+        index_name=index_name,
+        embedding_function=embeddings_model.embed_query,
+    )
+
+search_index = create_search_index()
 
 # Define the state for the agent
 class State(TypedDict):
@@ -165,26 +190,58 @@ def glossary_tool(query: str) -> str:
     return result
 
 @tool
-def db_schema_tool(fields: List[str]) -> Dict[str, List[Dict[str, str]]]:
+def index_search_tool(query: str) -> List[str]:
+    """
+    Execute a SQL Server query against the database and get back the result.
+    The query retrieves the index information for the database.
+    """
+
+    results = search_index.similarity_search(
+        query=query,
+        k=5,
+    )
+
+    return [result.page_content for result in results]
+
+def db_schema_tool(fields: List[str]) -> List[Document]:
     """
     Returns the schema information of the database for the given fields. Returns only relevant information,
     such as the table name, column name, and data type. It does not return the data as sql.
     """
-    #query = "SELECT table_schema, table_name, column_name, data_type FROM INFORMATION_SCHEMA.columns WHERE table_schema='dbo' AND column_name IN ({})".format(", ".join(fields))
-    query = "SELECT table_schema, table_name, column_name, data_type FROM INFORMATION_SCHEMA.columns WHERE table_schema='dbo' AND column_name LIKE '%{}%'".format("%' OR column_name LIKE '%".join(fields))
+
+    query = """
+            SELECT table_schema, table_name, column_name, data_type
+            FROM INFORMATION_SCHEMA.columns
+            WHERE table_schema='dbo'
+        """
+    
+    if fields:
+        query += " AND column_name IN ({})".format(", ".join(fields))
 
     result = db_query_tool(query)
     list_of_tuples = ast.literal_eval(result)
-    result_dict = {}
+    results = []
+    hash_algo = hashlib.sha256()
+
     for schema, table, column, data_type in list_of_tuples:
-        if (table) not in result_dict:
-            result_dict[(table)] = []
-        result_dict[(table)].append({"column": column, "data_type": data_type})
-    return result_dict
+        hash_algo.update(f"{table};{column};{data_type}".encode('utf-8'))
+        id = hash_algo.hexdigest()
+        results.append(Document(
+            id=id,
+            page_content=f"{table};{column};{data_type}",
+        ))
+    return results
+
+@st.cache_resource
+def index_database() -> None:
+    docs = db_schema_tool([])
+    search_index.add_documents(docs)
+
+index_database()
 
 #-----------------------------------------------------------------------------------------------
 
-sql_schema_tools = [db_schema_tool, glossary_tool]
+sql_schema_tools = [index_search_tool]
 
 def query_compiler(state: State) -> dict[str, list[AIMessage]]:
     prompt = """You are a SQL expert with a strong attention to detail.
@@ -205,10 +262,6 @@ def query_compiler(state: State) -> dict[str, list[AIMessage]]:
     ---
 
     When generating the query:
-
-    Use the following flow to fetch the neccessary information:
-    1. Fetch the glossary from the database
-    2. Fetch the table schema from the database using the relevant, filtered columns from the glossary
 
     Unless the user specifies a specific number of examples they wish to obtain, always limit your query to at most 5 results.
     You can order the results by a relevant column to return the most interesting examples in the database.
