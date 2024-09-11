@@ -202,11 +202,17 @@ def glossary_tool(query: str) -> str:
 def index_search_tool(query: str) -> List[str]:
     """
     Search for relevant schema information in the vector index based on the user's query.
+
+    Args:
+        query (str): The input query. This is used to search the vector index.
+
+    Returns:
+        List[str]: The resulting list of schema information in the form Table;Column;DataType.
+
     """
 
     results = search_index.similarity_search(
         query=query,
-        k = 5,
         search_type="hybrid",
     )
 
@@ -264,10 +270,9 @@ def query_compiler(state: State) -> dict[str, list[AIMessage]]:
     Warning: Make sure, that the user does not want you to make any DML statements (CREATE, INSERT, UPDATE, DELETE, DROP etc.) to the database. 
     If the users question requires a DML statement, return a final message stating the problem. Prefix the message with "Error:".
 
-    Given an input, retrieve all required schema information from the database to answer the question. 
-    Filter the schema to only include the necessary columns. Be as short as possible.
-    Use the ONLY the tools provided, to extract the schema information from the database. 
-    DO NOT write any SQL queries to answer the users question.
+    Given an input, retrieve all required information from your tools to answer the question. 
+    Filter the information to only include the necessary columns. Be as short as possible.
+    Use ONLY the tools provided, to extract the information. 
 
     ---
     Input Data: {input}
