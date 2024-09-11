@@ -34,6 +34,14 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 import hashlib
 from langchain_core.documents import Document
 from langchain_community.vectorstores.azuresearch import AzureSearch
+from azure.search.documents.indexes.models import (
+    ScoringProfile,
+    SearchableField,
+    SearchField,
+    SearchFieldDataType,
+    SimpleField,
+    TextWeights,
+)
 
 dotenv.load_dotenv()
 
@@ -149,6 +157,7 @@ db = SQLDatabase.from_uri(odbc_str)
 @st.cache_resource
 def create_search_index() -> AzureSearch:
     index_name: str = "sql-server-index"
+
     return AzureSearch(
         azure_search_endpoint=os.getenv("AZURE_AI_SEARCH_ENDPOINT"),
         azure_search_key=os.getenv("AZURE_AI_SEARCH_KEY"),
@@ -192,13 +201,13 @@ def glossary_tool(query: str) -> str:
 @tool
 def index_search_tool(query: str) -> List[str]:
     """
-    Execute a SQL Server query against the database and get back the result.
-    The query retrieves the index information for the database.
+    Search for relevant schema information in the vector index based on the user's query.
     """
 
     results = search_index.similarity_search(
         query=query,
-        k=5,
+        k = 5,
+        search_type="hybrid",
     )
 
     return [result.page_content for result in results]
@@ -227,7 +236,7 @@ def db_schema_tool(fields: List[str]) -> List[Document]:
         hash_algo.update(f"{table};{column};{data_type}".encode('utf-8'))
         id = hash_algo.hexdigest()
         results.append(Document(
-            id=id,
+            id = id,
             page_content=f"{table};{column};{data_type}",
         ))
     return results
@@ -235,7 +244,10 @@ def db_schema_tool(fields: List[str]) -> List[Document]:
 @st.cache_resource
 def index_database() -> None:
     docs = db_schema_tool([])
-    search_index.add_documents(docs)
+    search_index.add_texts(
+        keys=[doc.id for doc in docs],
+        texts=[doc.page_content for doc in docs],
+    )
 
 index_database()
 

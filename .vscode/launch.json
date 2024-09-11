@@ -6,7 +6,8 @@
       "type": "debugpy",
       "request": "launch",
       "module": "streamlit",
-      "args": ["run", "./src/sql-agents/app.py", "--server.port", "8000"]
+      "args": ["run", "./src/sql-agents-ai-search-optimized/app.py", "--server.port", "8000"],
+      "justMyCode": false
     }
   ]
 }
