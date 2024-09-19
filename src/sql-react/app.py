@@ -1,4 +1,5 @@
 import os
+import sys
 import dotenv
 import pandas as pd
 import tiktoken
@@ -10,48 +11,49 @@ from langchain_core.tools import tool
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, BaseMessage
 import random
-
-from opentelemetry import trace
-tracer = trace.get_tracer(__name__)
-
-dotenv.load_dotenv()
-
-# enable langchain instrumentation
+sys.path.append(os.path.join(os.path.dirname(__file__), '../shared'))
+from token_counter import TokenCounterCallback
 from opentelemetry.instrumentation.langchain import LangchainInstrumentor
-
-instrumentor = LangchainInstrumentor()
-if not instrumentor.is_instrumented_by_opentelemetry:
-    instrumentor.instrument()
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
+from opentelemetry import trace, trace as trace_api
+dotenv.load_dotenv()
 
 st.set_page_config(
     page_title="AI reactive bot that can interact with a database"
 )
 
+@st.cache_resource
+def setup_tracing():
+    exporter = AzureMonitorTraceExporter.from_connection_string(
+        os.environ["APPLICATIONINSIGHTS_CONNECTION_STRING"]
+    )
+    tracer_provider = TracerProvider()
+    trace.set_tracer_provider(tracer_provider)
+    tracer = trace.get_tracer(__name__)
+    span_processor = BatchSpanProcessor(exporter, schedule_delay_millis=60000)
+    trace.get_tracer_provider().add_span_processor(span_processor)
+    LangchainInstrumentor().instrument()
+    return tracer
+
+tracer = setup_tracing()
+
 st.title("💬 AI reactive database query bot")
 st.caption("🚀 A Bot that can use iterative tools to answer questions about relational data")
-
-def num_tokens_from_messages(messages: List[str]) -> int:
-    '''
-    Calculate the number of tokens in a list of messages. This is a somewhat naive implementation that simply concatenates 
-    the messages and counts the tokens in the resulting string. A more accurate implementation would take into account the 
-    fact that the messages are separate and should be counted as separate sequences.
-    If available, the token count should be taken directly from the model response.
-    '''
-    encoding = tiktoken.encoding_for_model("gpt-4o")
-    num_tokens = 0
-    content = ' '.join(messages)
-    num_tokens += len(encoding.encode(content))
-
-    return num_tokens
 
 def get_session_id() -> str:
     id = random.randint(0, 1000000)
     return "00000000-0000-0000-0000-" + str(id).zfill(12)
 
-if "session_id" not in st.session_state:
-    st.session_state["session_id"] = get_session_id()
-    print("started new session: " + st.session_state["session_id"])
-    st.write("You are running in session: " + st.session_state["session_id"])
+@st.cache_resource
+def create_session(st: st) -> None:
+    if "session_id" not in st.session_state:
+        st.session_state["session_id"] = get_session_id()
+        print("started new session: " + st.session_state["session_id"])
+        st.write("You are running in session: " + st.session_state["session_id"])
+
+create_session(st)
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
@@ -70,17 +72,6 @@ for message in st.session_state.chat_history:
         with st.chat_message("Agent"):
             st.markdown(message.content)
 
-class TokenCounterCallback(BaseCallbackHandler):
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-
-    def on_llm_new_token(self, token: str, **kwargs: Any) -> Any:
-        self.completion_tokens += 1
-
-    def on_chat_model_start(self, serialized: Dict[str, Any], messages: List[List[BaseMessage]], **kwargs: Any) -> Any:
-        self.prompt_tokens += num_tokens_from_messages( [message.content for message in messages[0]])
-         
-
 callback = TokenCounterCallback()
 
 llm: AzureChatOpenAI = None
@@ -92,6 +83,7 @@ if "AZURE_OPENAI_API_KEY" in os.environ:
         openai_api_version=os.getenv("AZURE_OPENAI_VERSION"),
         temperature=0,
         streaming=True,
+        model_kwargs={"stream_options":{"include_usage": True}},
         callbacks=[callback]
     )
 
@@ -105,6 +97,7 @@ else:
         temperature=0,
         openai_api_type="azure_ad",
         streaming=True,
+        model_kwargs={"stream_options":{"include_usage": True}},
         callbacks=[callback]
     )
 
@@ -269,10 +262,10 @@ if human_query is not None and human_query != "":
 
             span.set_attribute("gen_ai.response.completion_token",callback.completion_tokens) 
             span.set_attribute("gen_ai.response.prompt_tokens", callback.prompt_tokens) 
-            span.set_attribute("gen_ai.response.total_tokens", callback.completion_tokens + callback.prompt_tokens)
+            span.set_attribute("gen_ai.response.total_tokens", callback.total_tokens)
             
             ai_response = st.write(response["output"])
-            st.write("The total number of tokens used in this conversation was: ", callback.completion_tokens + callback.prompt_tokens)
+            st.write("The total number of tokens used in this conversation was: ", callback.total_tokens)
 
             print(response)
 

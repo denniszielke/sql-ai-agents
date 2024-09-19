@@ -1,9 +1,9 @@
 import ast
 import os
+import sys
 import random
 from typing import Any, Dict, List, Literal, Annotated, TypedDict, cast
 from uuid import UUID
-
 import dotenv
 from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 import streamlit as st
@@ -14,9 +14,7 @@ from IPython.display import Image
 from langchain.agents.agent import AgentAction
 from langchain_community.agent_toolkits import SQLDatabaseToolkit
 from langchain_community.utilities import SQLDatabase
-from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, BaseMessage
-from langchain_core.outputs.llm_result import LLMResult
 from langchain_core.outputs import ChatGeneration
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.pydantic_v1 import BaseModel, Field
@@ -36,14 +34,8 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 import hashlib
 from langchain_core.documents import Document
 from langchain_community.vectorstores.azuresearch import AzureSearch
-from azure.search.documents.indexes.models import (
-    ScoringProfile,
-    SearchableField,
-    SearchField,
-    SearchFieldDataType,
-    SimpleField,
-    TextWeights,
-)
+sys.path.append(os.path.join(os.path.dirname(__file__), '../shared'))
+from token_counter import TokenCounterCallback
 
 dotenv.load_dotenv()
 
@@ -83,20 +75,6 @@ create_session(st)
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
-
-class TokenCounterCallback(BaseCallbackHandler):
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
-
-    def on_llm_end(self, response: LLMResult, *, run_id: UUID, parent_run_id: UUID | None = None, **kwargs: Any) -> Any:
-        for result in response.flatten():
-            generation = result.generations[0][0]
-            if isinstance(generation.message, AIMessage):
-                self.completion_tokens += generation.message.usage_metadata.get("output_tokens", 0)
-                self.prompt_tokens += generation.message.usage_metadata.get("input_tokens", 0)
-        self.total_tokens = self.completion_tokens + self.prompt_tokens
-        return
 
 callback = TokenCounterCallback()
 

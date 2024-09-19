@@ -1,7 +1,8 @@
 import os
+import sys
 import random
 from typing import Any, Dict, List, Literal, Annotated, TypedDict
-
+from uuid import UUID
 import dotenv
 from langchain_openai import AzureChatOpenAI
 import streamlit as st
@@ -30,6 +31,8 @@ from opentelemetry.instrumentation.langchain import LangchainInstrumentor
 from opentelemetry.sdk import trace as trace_sdk
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
+sys.path.append(os.path.join(os.path.dirname(__file__), '../shared'))
+from token_counter import TokenCounterCallback
 
 dotenv.load_dotenv()
 
@@ -67,36 +70,10 @@ def create_session(st: st) -> None:
 tracer = setup_tracing()
 create_session(st)
 
-def num_tokens_from_messages(messages: List[str]) -> int:
-    '''
-    Calculate the number of tokens in a list of messages. This is a somewhat naive implementation that simply concatenates 
-    the messages and counts the tokens in the resulting string. A more accurate implementation would take into account the 
-    fact that the messages are separate and should be counted as separate sequences.
-    If available, the token count should be taken directly from the model response.
-    '''
-    encoding = tiktoken.encoding_for_model("gpt-4o")
-    num_tokens = 0
-    content = ' '.join(messages)
-    num_tokens += len(encoding.encode(content))
-
-    return num_tokens
-
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-class TokenCounterCallback(BaseCallbackHandler):
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-
-    def on_llm_new_token(self, token: str, **kwargs: Any) -> Any:
-        self.completion_tokens += 1
-
 callback = TokenCounterCallback()
-
-def measure_prompt_tokens(messages: List[BaseMessage]) -> List[BaseMessage]:
-    for message in messages:
-        callback.prompt_tokens += num_tokens_from_messages([message.content])
-    return messages
 
 llm: AzureChatOpenAI = None
 if "AZURE_OPENAI_API_KEY" in os.environ:
@@ -107,6 +84,7 @@ if "AZURE_OPENAI_API_KEY" in os.environ:
         openai_api_version=os.getenv("AZURE_OPENAI_VERSION"),
         temperature=0,
         streaming=True,
+        model_kwargs={"stream_options":{"include_usage": True}},
         callbacks=[callback]
     )
 else:
@@ -119,6 +97,7 @@ else:
         temperature=0,
         openai_api_type="azure_ad",
         streaming=True,
+        model_kwargs={"stream_options":{"include_usage": True}},
         callbacks=[callback]
     )
 
@@ -197,7 +176,7 @@ def query_compiler(state: State) -> dict[str, list[AIMessage]]:
         [("system", prompt), ("placeholder", "{input}")]
     )
     call = prompt_template | llm.bind_tools(sql_schema_tools, tool_choice="auto")
-    return {"messages": [call.invoke({"input": measure_prompt_tokens(state["messages"])})]}
+    return {"messages": [call.invoke({"input": state["messages"]})]}
 
 
 workflow.add_node("query_compiler", query_compiler)
@@ -229,7 +208,7 @@ def query_check(state: State) -> dict[str, list[AIMessage]]:
         [("system", prompt), ("placeholder", "{input}")]
     )
     call = prompt_template | llm.bind_tools([db_query_tool], tool_choice="required")
-    return {"messages": [call.invoke({"input": measure_prompt_tokens([state["messages"][-1]])})]}
+    return {"messages": [call.invoke({"input": [state["messages"][-1]]})]}
 
 workflow.add_node("correct_and_execute_query", query_check)
 workflow.add_node("db_query_tool", ToolNode([db_query_tool]))
@@ -250,7 +229,7 @@ def format_gen_node(state: State):
         [("system", prompt), ("placeholder", "{input}")]
     )
     call = prompt_template | llm
-    message = measure_prompt_tokens([state["messages"][-1]])[-1]
+    message = [state["messages"][-1]][-1]
     return {"messages": [call.invoke({"input": [message.content]})]}
 
 workflow.add_node("format_gen", format_gen_node)
@@ -329,7 +308,7 @@ if human_query is not None and human_query != "":
                         st.write(message.content.replace('\n\n', ''))
 
         st.write("The conversation has ended. Those were the steps taken to answer your query.")
-        st.write("The total number of tokens used in this conversation was: ", callback.completion_tokens + callback.prompt_tokens)
+        st.write("The total number of tokens used in this conversation was: ", callback.total_tokens)
         st.image(
             app.get_graph(xray=True).draw_mermaid_png(
                 draw_method=MermaidDrawMethod.API,
@@ -337,4 +316,4 @@ if human_query is not None and human_query != "":
         )
         span.set_attribute("gen_ai.response.completion_token",callback.completion_tokens) 
         span.set_attribute("gen_ai.response.prompt_tokens", callback.prompt_tokens) 
-        span.set_attribute("gen_ai.response.total_tokens", callback.completion_tokens + callback.prompt_tokens)
+        span.set_attribute("gen_ai.response.total_tokens", callback.total_tokens)

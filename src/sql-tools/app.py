@@ -1,4 +1,5 @@
 import os
+import sys
 import dotenv
 import pandas as pd
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
@@ -11,19 +12,34 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 import random
 
 dotenv.load_dotenv()
-# start a trace session, and print a url for user to check trace
-# start_trace()
 
 # enable langchain instrumentation
 from opentelemetry.instrumentation.langchain import LangchainInstrumentor
-
-instrumentor = LangchainInstrumentor()
-if not instrumentor.is_instrumented_by_opentelemetry:
-    instrumentor.instrument()
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
+from opentelemetry import trace, trace as trace_api
+sys.path.append(os.path.join(os.path.dirname(__file__), '../shared'))
+from token_counter import TokenCounterCallback
 
 st.set_page_config(
     page_title="AI bot that can use a database as tools"
 )
+
+@st.cache_resource
+def setup_tracing():
+    exporter = AzureMonitorTraceExporter.from_connection_string(
+        os.environ["APPLICATIONINSIGHTS_CONNECTION_STRING"]
+    )
+    tracer_provider = TracerProvider()
+    trace.set_tracer_provider(tracer_provider)
+    tracer = trace.get_tracer(__name__)
+    span_processor = BatchSpanProcessor(exporter, schedule_delay_millis=60000)
+    trace.get_tracer_provider().add_span_processor(span_processor)
+    LangchainInstrumentor().instrument()
+    return tracer
+
+tracer = setup_tracing()
 
 st.title("💬 AI bot that talk to a database")
 st.caption("🚀 A Bot that can use tools to answer questions about relational data")
@@ -32,10 +48,14 @@ def get_session_id() -> str:
     id = random.randint(0, 1000000)
     return "00000000-0000-0000-0000-" + str(id).zfill(12)
 
-if "session_id" not in st.session_state:
-    st.session_state["session_id"] = get_session_id()
-    print("started new session: " + st.session_state["session_id"])
-    st.write("You are running in session: " + st.session_state["session_id"])
+@st.cache_resource
+def create_session(st: st) -> None:
+    if "session_id" not in st.session_state:
+        st.session_state["session_id"] = get_session_id()
+        print("started new session: " + st.session_state["session_id"])
+        st.write("You are running in session: " + st.session_state["session_id"])
+
+create_session(st)
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
@@ -54,6 +74,8 @@ for message in st.session_state.chat_history:
         with st.chat_message("Agent"):
             st.markdown(message.content)
 
+callback = TokenCounterCallback()
+
 llm: AzureChatOpenAI = None
 if "AZURE_OPENAI_API_KEY" in os.environ:
     llm = AzureChatOpenAI(
@@ -62,7 +84,9 @@ if "AZURE_OPENAI_API_KEY" in os.environ:
         azure_deployment=os.getenv("AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME"),
         openai_api_version=os.getenv("AZURE_OPENAI_VERSION"),
         temperature=0,
-        streaming=True
+        streaming=True,
+        model_kwargs={"stream_options":{"include_usage": True}},
+        callbacks=[callback]
     )
 else:
     token_provider = get_bearer_token_provider(DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default")
@@ -73,7 +97,9 @@ else:
         openai_api_version=os.getenv("AZURE_OPENAI_VERSION"),
         temperature=0,
         openai_api_type="azure_ad",
-        streaming=True
+        streaming=True,
+        model_kwargs={"stream_options":{"include_usage": True}},
+        callbacks=[callback]
     )
 
 driver = '{ODBC Driver 18 for SQL Server}'
@@ -139,11 +165,19 @@ if human_query is not None and human_query != "":
 
     st.session_state.chat_history.append(HumanMessage(human_query))
 
-    with st.chat_message("Human"):
-        st.markdown(human_query)
+    with tracer.start_as_current_span("agent-chain") as span:
 
-    with st.chat_message("Agent"):
-        response = chain.invoke({"question": human_query})
-        print(response)
-        print(chain.get_prompts()[0].pretty_print())
-        st.write(response)
+        with st.chat_message("Human"):
+            st.markdown(human_query)
+
+        with st.chat_message("Agent"):
+            response = chain.invoke({"question": human_query})
+            print(response)
+            print(chain.get_prompts()[0].pretty_print())
+            st.write(response)
+
+        span.set_attribute("gen_ai.response.completion_token",callback.completion_tokens) 
+        span.set_attribute("gen_ai.response.prompt_tokens", callback.prompt_tokens) 
+        span.set_attribute("gen_ai.response.total_tokens", callback.total_tokens)
+            
+        st.write("The total number of tokens used in this conversation was: ", callback.total_tokens)
