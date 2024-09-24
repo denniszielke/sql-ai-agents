@@ -159,14 +159,6 @@ def db_query_tool(query: str) -> str:
     return result
 
 @tool
-def glossary_tool(query: str) -> str:
-    """
-    This tool retrieves the glossary of field names and descriptions from the database.
-    """
-    result = db_query_tool("SELECT * FROM dbo.SAP_Column_Descriptions")
-    return result
-
-@tool
 def index_search_tool(query: str) -> List[str]:
     """
     Search for relevant schema information in the vector index based on the user's query.
@@ -175,7 +167,7 @@ def index_search_tool(query: str) -> List[str]:
         query (str): The input query. This is used to search the vector index.
 
     Returns:
-        List[str]: The resulting list of schema information in the form [DbTableName;ColumnName;DataType].
+        List[str]: The resulting list of schema information in the form [DbTableName;ColumnName;ColumnDescription;DataType].
 
     """
 
@@ -193,9 +185,9 @@ def db_schema_tool(fields: List[str]) -> List[Document]:
     """
 
     query = """
-            SELECT table_schema, table_name, column_name, data_type
-            FROM INFORMATION_SCHEMA.columns
-            WHERE table_schema='dbo'
+            SELECT table_name, column_name, data_type, [dbo].[SAP_Column_Descriptions].[Description] as [description]
+            FROM INFORMATION_SCHEMA.columns INNER JOIN [dbo].[SAP_Column_Descriptions] ON [dbo].[SAP_Column_Descriptions].[Column Name] = column_name
+            WHERE table_schema='dbo' AND table_name!='SAP_Column_Descriptions'
         """
     
     if fields:
@@ -206,12 +198,12 @@ def db_schema_tool(fields: List[str]) -> List[Document]:
     results = []
     hash_algo = hashlib.sha256()
 
-    for schema, table, column, data_type in list_of_tuples:
+    for table, column, data_type, description in list_of_tuples:
         hash_algo.update(f"{table};{column};{data_type}".encode('utf-8'))
         id = hash_algo.hexdigest()
         results.append(Document(
             id = id,
-            page_content=f"{table};{column};{data_type}",
+            page_content=f"TableName:{table};ColumnName:{column};ColumnDescription:{description};DataType:{data_type}",
         ))
     return results
 
@@ -227,7 +219,7 @@ index_database()
 
 #-----------------------------------------------------------------------------------------------
 
-sql_schema_tools = [glossary_tool, index_search_tool]
+sql_schema_tools = [index_search_tool]
 
 def query_compiler(state: State) -> dict[str, list[AIMessage]]:
     prompt = """You are a SQL expert with a strong attention to detail.
@@ -240,13 +232,15 @@ def query_compiler(state: State) -> dict[str, list[AIMessage]]:
 
     Given an input, retrieve all required information from your tools to answer the question. 
     Filter the information to only include the necessary columns. Be as short as possible.
-    Use ONLY the tools provided, to extract the information. 
+    Use ONLY the tools provided, to extract the information.
 
     ---
     Input Data: {input}
     ---
 
     When generating the query:
+
+    !! If you can't find a fitting answer, do not make guesses, output a recommendation and STOP the process by return a message starting with "Stop:". !!
 
     Unless the user specifies a specific number of examples they wish to obtain, always limit your query to at most 5 results.
     You can order the results by a relevant column to return the most interesting examples in the database.
@@ -291,7 +285,7 @@ def query_check(state: State) -> dict[str, list[AIMessage]]:
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompt), ("placeholder", "{input}")]
     )
-    call = prompt_template | llm.bind_tools([db_query_tool], tool_choice="required")
+    call = prompt_template | llm.bind_tools([db_query_tool], tool_choice="auto")
     return {"messages": [call.invoke({"input": [state["messages"][-1]]})]}
 
 workflow.add_node("correct_and_execute_query", query_check)
@@ -320,17 +314,16 @@ workflow.add_node("format_gen", format_gen_node)
 
 #-----------------------------------------------------------------------------------------------
 
-def should_continue(state: State) -> Literal["sql_tools", "correct_and_execute_query"]:
-    messages = state["messages"]
-    last_message = messages[-1]
+def should_continue(state: State) -> Literal["__end__", "sql_tools", "correct_and_execute_query"]:
+    last_message = state["messages"][-1]
     if last_message.tool_calls:
         return "sql_tools"
-    
+    elif last_message.content.startswith("Stop:"):
+        return "__end__"
     return "correct_and_execute_query"
     
 def should_continue2(state: State) -> Literal["format_gen", "query_compiler"]:
-    messages = state["messages"]
-    last_message = messages[-1]
+    last_message = state["messages"][-1]
     if last_message.content.startswith("Error:"):
         return "query_compiler"
     else:
@@ -348,6 +341,7 @@ workflow.add_conditional_edges(
     "db_query_tool",
     should_continue2, # -> format_gen
 )
+
 workflow.add_edge("format_gen", END)
 
 app = workflow.compile()
