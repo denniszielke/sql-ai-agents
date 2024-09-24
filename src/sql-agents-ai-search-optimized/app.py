@@ -155,15 +155,13 @@ def db_query_tool(query: str) -> str:
     """
     result = db.run_no_throw(query)
     if not result:
-        return "[]"
+        return "Error: The query is not correct. Please rewrite the query and try again."
     return result
 
 @tool
 def glossary_tool(query: str) -> str:
     """
-    Execute a SQL Server query against the database and get back the result.
-    The query retrieves the glossary of the database.
-    The glossary contains the description for each column in the database.
+    This tool retrieves the glossary of field names and descriptions from the database.
     """
     result = db_query_tool("SELECT * FROM dbo.SAP_Column_Descriptions")
     return result
@@ -177,7 +175,7 @@ def index_search_tool(query: str) -> List[str]:
         query (str): The input query. This is used to search the vector index.
 
     Returns:
-        List[str]: The resulting list of schema information in the form Table;Column;DataType.
+        List[str]: The resulting list of schema information in the form [DbTableName;ColumnName;DataType].
 
     """
 
@@ -229,7 +227,7 @@ index_database()
 
 #-----------------------------------------------------------------------------------------------
 
-sql_schema_tools = [index_search_tool]
+sql_schema_tools = [glossary_tool, index_search_tool]
 
 def query_compiler(state: State) -> dict[str, list[AIMessage]]:
     prompt = """You are a SQL expert with a strong attention to detail.
@@ -322,15 +320,13 @@ workflow.add_node("format_gen", format_gen_node)
 
 #-----------------------------------------------------------------------------------------------
 
-def should_continue(state: State) -> Literal["__end__", "sql_tools", "correct_and_execute_query"]:
+def should_continue(state: State) -> Literal["sql_tools", "correct_and_execute_query"]:
     messages = state["messages"]
     last_message = messages[-1]
-    if last_message.content.startswith("Error:"):
-        return "__end__"
-    elif last_message.tool_calls:
+    if last_message.tool_calls:
         return "sql_tools"
-    else:
-        return "correct_and_execute_query"
+    
+    return "correct_and_execute_query"
     
 def should_continue2(state: State) -> Literal["format_gen", "query_compiler"]:
     messages = state["messages"]
