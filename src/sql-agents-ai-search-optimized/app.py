@@ -159,14 +159,6 @@ def db_query_tool(query: str) -> str:
     return result
 
 @tool
-def glossary_tool(query: str) -> str:
-    """
-    This tool retrieves the glossary of field names and descriptions from the database.
-    """
-    result = db_query_tool("SELECT * FROM dbo.SAP_Column_Descriptions")
-    return result
-
-@tool
 def index_search_tool(query: str) -> List[str]:
     """
     Search for relevant schema information in the vector index based on the user's query.
@@ -175,7 +167,7 @@ def index_search_tool(query: str) -> List[str]:
         query (str): The input query. This is used to search the vector index.
 
     Returns:
-        List[str]: The resulting list of schema information in the form [DbTableName;ColumnName;DataType].
+        List[str]: The resulting list of schema information in the form [TableName:Name;ColumnName:Name;DataType:Type].
 
     """
 
@@ -193,25 +185,22 @@ def db_schema_tool(fields: List[str]) -> List[Document]:
     """
 
     query = """
-            SELECT table_schema, table_name, column_name, data_type
+            SELECT table_name, column_name, data_type
             FROM INFORMATION_SCHEMA.columns
             WHERE table_schema='dbo'
         """
-    
-    if fields:
-        query += " AND column_name IN ({})".format(", ".join(fields))
 
     result = db_query_tool(query)
     list_of_tuples = ast.literal_eval(result)
     results = []
     hash_algo = hashlib.sha256()
 
-    for schema, table, column, data_type in list_of_tuples:
+    for table, column, data_type in list_of_tuples:
         hash_algo.update(f"{table};{column};{data_type}".encode('utf-8'))
         id = hash_algo.hexdigest()
         results.append(Document(
             id = id,
-            page_content=f"{table};{column};{data_type}",
+            page_content=f"TableName:{table};ColumnName:{column};DataType:{data_type};",
         ))
     return results
 
@@ -227,7 +216,7 @@ index_database()
 
 #-----------------------------------------------------------------------------------------------
 
-sql_schema_tools = [glossary_tool, index_search_tool]
+sql_schema_tools = [index_search_tool]
 
 def query_compiler(state: State) -> dict[str, list[AIMessage]]:
     prompt = """You are a SQL expert with a strong attention to detail.
@@ -291,7 +280,7 @@ def query_check(state: State) -> dict[str, list[AIMessage]]:
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompt), ("placeholder", "{input}")]
     )
-    call = prompt_template | llm.bind_tools([db_query_tool], tool_choice="required")
+    call = prompt_template | llm.bind_tools([db_query_tool], tool_choice="auto")
     return {"messages": [call.invoke({"input": [state["messages"][-1]]})]}
 
 workflow.add_node("correct_and_execute_query", query_check)
@@ -325,7 +314,6 @@ def should_continue(state: State) -> Literal["sql_tools", "correct_and_execute_q
     last_message = messages[-1]
     if last_message.tool_calls:
         return "sql_tools"
-    
     return "correct_and_execute_query"
     
 def should_continue2(state: State) -> Literal["format_gen", "query_compiler"]:
