@@ -1,6 +1,6 @@
 # Talking to a database with a large language model
 
-This project demonstrates different approaches on how to implement a bot that can talk to a relational database.
+This project demonstrates different approaches on how to implement a bot that can talk to a relational database using different architecture patterns.
 
 ![image info](./screenshot.png)
 
@@ -17,6 +17,10 @@ This project demonstrates different approaches on how to implement a bot that ca
 3.) Multi agent
 
 ![image info](./agents.png)
+
+3.) AI Search optimized agents
+
+![image info](./embeded-agents.png)
 
 ## Deploy Infrastructure
 
