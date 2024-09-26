@@ -5,13 +5,19 @@ This project demonstrates different approaches on how to implement a bot that ca
 This allows you to enter abstract questions that the bot will try to answer by reasoning over the available data structures using a vector database, create a plan to query the data and iterate over possible queries and finally execute the query. If anything goes wrong or does not look correct the bot will identify issues and fix them automatically.
 
 The question can be something like that:
-![image info](./question.png)
+![image info](./img/question.png)
+
+The bot will use tools to solve the problem:
+![image info](./img/tools_used.png)
 
 After different iterations the bot will be able generate a SQL query:
-![image info](./query.png)
+![image info](./img/query.png)
 
 And finally it will come up with a way to output the response in a suitable format:
-![image info](./output.png)
+![image info](./img/output.png)
+
+It will also plot the path taken and the amount of tokens used
+![image info](./img/plan.png)
 
 ## Implementation patterns
 
@@ -19,19 +25,19 @@ To compare efficiency, reliability, creativity and scalability we have implement
 
 1.) Simple prompt
 
-![image info](./simple.png)
+![image info](./img/simple.png)
 
 2.) ReAct based Prompt
 
-![image info](./tools.png)
+![image info](./img/tools.png)
 
 3.) Multi agent
 
-![image info](./agents.png)
+![image info](./img/agents.png)
 
 4.) AI Search optimized agents
 
-![image info](./embeded-agents.png)
+![image info](./img/embeded-agents.png)
 
 ## Deploy Infrastructure
 
