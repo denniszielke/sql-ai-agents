@@ -2,9 +2,20 @@
 
 This project demonstrates different approaches on how to implement a bot that can talk to a relational database using different architecture patterns.
 
-![image info](./screenshot.png)
+This allows you to enter abstract questions that the bot will try to answer by reasoning over the available data structures using a vector database, create a plan to query the data and iterate over possible queries and finally execute the query. If anything goes wrong or does not look correct the bot will identify issues and fix them automatically.
+
+The question can be something like that:
+![image info](./question.png)
+
+After different iterations the bot will be able generate a SQL query:
+![image info](./query.png)
+
+And finally it will come up with a way to output the response in a suitable format:
+![image info](./output.png)
 
 ## Implementation patterns
+
+To compare efficiency, reliability, creativity and scalability we have implemented the following different architecture patterns for this:
 
 1.) Simple prompt
 
@@ -18,7 +29,7 @@ This project demonstrates different approaches on how to implement a bot that ca
 
 ![image info](./agents.png)
 
-3.) AI Search optimized agents
+4.) AI Search optimized agents
 
 ![image info](./embeded-agents.png)
 
