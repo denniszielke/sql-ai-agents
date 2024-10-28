@@ -9,6 +9,7 @@ param containerAppsEnvironmentName string
 param containerRegistryName string
 param logAnalyticsWorkspaceName string
 param applicationInsightsName string
+param keyVaultName string
 
 module containerAppsEnvironment 'container-apps-environment.bicep' = {
   name: '${name}-container-apps-environment'
@@ -47,6 +48,14 @@ module containerRegistryAccess '../security/registry-access.bicep' = {
   name: '${deployment().name}-registry-access'
   params: {
     containerRegistryName: containerRegistryName
+    principalId: userIdentity.properties.principalId
+  }
+}
+
+module keyVaultAccess '../security/keyvault-access.bicep' = {
+  name: '${deployment().name}-keyvault-access'
+  params: {
+    keyVaultName: keyVaultName
     principalId: userIdentity.properties.principalId
   }
 }

@@ -81,6 +81,7 @@ module containerApps './core/host/container-apps.bicep' = {
     applicationInsightsName: monitoring.outputs.applicationInsightsName
     identityName: '${abbrs.managedIdentityUserAssignedIdentities}api-agents'
     openaiName: openai.outputs.openaiName
+    keyVaultName: keyVault.outputs.name
   }
 }
 
@@ -157,6 +158,7 @@ output AZURE_CONTAINER_ENVIRONMENT_NAME string = containerApps.outputs.environme
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = containerApps.outputs.registryLoginServer
 output AZURE_CONTAINER_REGISTRY_NAME string = containerApps.outputs.registryName
 output OPENAI_API_TYPE string = 'azure'
+output OPENAI_LOCATION string = aiResourceLocation
 output AZURE_OPENAI_VERSION string = openaiApiVersion
 output AZURE_OPENAI_API_KEY string = openai.outputs.openaiKey
 output AZURE_OPENAI_ENDPOINT string = openai.outputs.openaiEndpoint
@@ -169,5 +171,6 @@ output AZURE_AI_SEARCH_ENDPOINT string = search.outputs.searchEndpoint
 output AZURE_AI_SEARCH_KEY string = search.outputs.searchAdminKey
 output AZURE_SQL_SERVER_NAME string = sqlServer.outputs.serverName
 output AZURE_SQL_APP_USER string = sqlServer.outputs.appUser
+output AZURE_SQL_PASSWORD string = sqlServer.outputs.appUserPassword
 output AZURE_SQL_DATABASE_NAME string = sqlServer.outputs.databaseName
 output AZURE_SQL_CONNECTIONSTRING string = sqlServer.outputs.connectionString

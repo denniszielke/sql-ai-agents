@@ -34,7 +34,6 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 import hashlib
 from langchain_core.documents import Document
 from langchain_community.vectorstores.azuresearch import AzureSearch
-sys.path.append(os.path.join(os.path.dirname(__file__), '../shared'))
 from token_counter import TokenCounterCallback
 
 dotenv.load_dotenv()

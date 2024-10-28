@@ -107,6 +107,22 @@ wget https://raw.githubusercontent.com/microsoft/sql-server-samples/master/sampl
   }
 }
 
+resource databaseNameSecret 'Microsoft.KeyVault/vaults/secrets@2022-07-01' = {
+  parent: keyVault
+  name: 'databasename'
+  properties: {
+    value: databaseName
+  }
+}
+
+resource serverNameSecret 'Microsoft.KeyVault/vaults/secrets@2022-07-01' = {
+  parent: keyVault
+  name: 'servername'
+  properties: {
+    value: sqlServer.properties.fullyQualifiedDomainName
+  }
+}
+
 resource sqlAdminPasswordSecret 'Microsoft.KeyVault/vaults/secrets@2022-07-01' = {
   parent: keyVault
   name: 'sqlAdminPassword'
@@ -115,9 +131,17 @@ resource sqlAdminPasswordSecret 'Microsoft.KeyVault/vaults/secrets@2022-07-01' =
   }
 }
 
+resource appUserNameSecret 'Microsoft.KeyVault/vaults/secrets@2022-07-01' = {
+  parent: keyVault
+  name: 'appusername'
+  properties: {
+    value: appUser
+  }
+}
+
 resource appUserPasswordSecret 'Microsoft.KeyVault/vaults/secrets@2022-07-01' = {
   parent: keyVault
-  name: 'appUserPassword'
+  name: 'appuserpassword'
   properties: {
     value: appUserPassword
   }
@@ -142,3 +166,4 @@ output databaseName string = sqlDB.name
 output serverName string = sqlServer.name
 output serverFqdn string = sqlServer.properties.fullyQualifiedDomainName
 output appUser string = appUser
+output appUserPassword string = appUserPassword

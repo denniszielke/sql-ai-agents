@@ -31,7 +31,6 @@ from opentelemetry.instrumentation.langchain import LangchainInstrumentor
 from opentelemetry.sdk import trace as trace_sdk
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-sys.path.append(os.path.join(os.path.dirname(__file__), '../shared'))
 from token_counter import TokenCounterCallback
 
 dotenv.load_dotenv()

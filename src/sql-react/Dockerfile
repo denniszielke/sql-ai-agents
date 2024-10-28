@@ -22,6 +22,7 @@ WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 COPY app.py .
+COPY token_counter.py .
 EXPOSE $PORT
 ARG STREAMLIT_SERVER_PORT=$PORT
 ENTRYPOINT ["streamlit", "run", "app.py", "--server.port=8000", "--server.address=0.0.0.0"]

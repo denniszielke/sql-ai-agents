@@ -8,9 +8,9 @@ param containerAppsEnvironmentName string
 param containerRegistryName string
 param serviceName string = 'web'
 param imageName string
-param poolManagementEndpoint string
 param openaiName string
 param searchName string
+param keyVaultName string
 
 resource userIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' existing = {
   name: identityName
@@ -39,6 +39,28 @@ resource app 'Microsoft.App/containerApps@2023-04-01-preview' = {
           identity: userIdentity.id
         }
       ]
+      secrets: [
+        {
+          name: 'servername'
+          keyVaultUrl: keyVault.properties.vaultUri
+          identity: userIdentity.id
+        }
+        {
+          name: 'databasename'
+          keyVaultUrl: keyVault.properties.vaultUri
+          identity: userIdentity.id
+        }
+        {
+          name: 'appusername'
+          keyVaultUrl: keyVault.properties.vaultUri
+          identity: userIdentity.id
+        }
+        {
+          name: 'appuserpassword'
+          keyVaultUrl: keyVault.properties.vaultUri
+          identity: userIdentity.id
+        }
+      ]
     }
     template: {
       containers: [
@@ -55,19 +77,32 @@ resource app 'Microsoft.App/containerApps@2023-04-01-preview' = {
               value: applicationInsights.properties.ConnectionString
             }
             {
-              name: 'POOL_MANAGEMENT_ENDPOINT'
-              value: poolManagementEndpoint}
+              name: 'AZURE_SQL_APP_USER'
+              secretRef: 'appusername'
+            }
+            {
+              name: 'AZURE_SQL_DATABASE_NAME'
+              secretRef: 'databasename'
+            }
+            {
+              name: 'AZURE_SQL_SERVER_NAME'
+              secretRef: 'servername'
+            }
+            {
+              name: 'AZURE_SQL_PASSWORD'
+              secretRef: 'appuserpassword'
+            }
             {
               name: 'AZURE_OPENAI_ENDPOINT'
               value: account.properties.endpoint
             }
             {
               name: 'AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME'
-              value: 'gpt-35-turbo'
+              value: 'gpt-4o'
             }
             {
               name: 'AZURE_OPENAI_VERSION'
-              value: '2024-02-01'
+              value: '2024-08-01-preview'
             }
             {
               name: 'OPENAI_API_TYPE'
@@ -75,11 +110,11 @@ resource app 'Microsoft.App/containerApps@2023-04-01-preview' = {
             }
             {
               name: 'AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME'
-              value: 'text-embedding-3-small'
+              value: 'text-embedding-ada-002'
             }
             {
               name: 'AZURE_OPENAI_EMBEDDING_MODEL'
-              value: 'text-embedding-3-small'
+              value: 'text-embedding-ada-002'
             }
             {
               name: 'AZURE_AI_SEARCH_NAME'
@@ -122,6 +157,10 @@ resource applicationInsights 'Microsoft.Insights/components@2020-02-02' existing
 
 resource search 'Microsoft.Search/searchServices@2023-11-01' existing = {
   name: searchName
+}
+
+resource keyVault 'Microsoft.KeyVault/vaults@2022-07-01' existing = {
+  name: keyVaultName
 }
 
 output uri string = 'https://${app.properties.configuration.ingress.fqdn}'

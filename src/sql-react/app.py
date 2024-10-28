@@ -1,9 +1,13 @@
 import os
 import sys
+import struct
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine.url import URL
 import dotenv
 import pandas as pd
 import tiktoken
 from typing import Any, Dict, List, Literal, Annotated, TypedDict
+from azure import identity
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 import streamlit as st
 from langchain_openai import AzureChatOpenAI
@@ -11,7 +15,6 @@ from langchain_core.tools import tool
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, BaseMessage
 import random
-sys.path.append(os.path.join(os.path.dirname(__file__), '../shared'))
 from token_counter import TokenCounterCallback
 from opentelemetry.instrumentation.langchain import LangchainInstrumentor
 from opentelemetry.sdk.trace import TracerProvider
@@ -101,10 +104,14 @@ else:
         callbacks=[callback]
     )
 
+connection_string = os.environ["AZURE_SQL_CONNECTIONSTRING"]
+
 driver = '{ODBC Driver 18 for SQL Server}'
 odbc_str = 'mssql+pyodbc:///?odbc_connect=' \
                 'Driver='+driver+ \
                 ';' + os.getenv("AZURE_SQL_CONNECTIONSTRING")
+
+db = SQLDatabase.from_uri(odbc_str)
 
 from langchain_community.utilities import SQLDatabase
 

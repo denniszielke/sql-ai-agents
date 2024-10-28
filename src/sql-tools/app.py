@@ -19,7 +19,6 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
 from opentelemetry import trace, trace as trace_api
-sys.path.append(os.path.join(os.path.dirname(__file__), '../shared'))
 from token_counter import TokenCounterCallback
 
 st.set_page_config(
