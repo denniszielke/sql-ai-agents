@@ -42,24 +42,29 @@ resource app 'Microsoft.App/containerApps@2023-04-01-preview' = {
       secrets: [
         {
           name: 'servername'
-          keyVaultUrl: keyVault.properties.vaultUri
+          keyVaultUrl: '${keyVault.properties.vaultUri}secrets/servername'
           identity: userIdentity.id
         }
         {
           name: 'databasename'
-          keyVaultUrl: keyVault.properties.vaultUri
+          keyVaultUrl: '${keyVault.properties.vaultUri}secrets/databasename'
           identity: userIdentity.id
         }
         {
           name: 'appusername'
-          keyVaultUrl: keyVault.properties.vaultUri
+          keyVaultUrl: '${keyVault.properties.vaultUri}secrets/appusername'
           identity: userIdentity.id
         }
         {
           name: 'appuserpassword'
-          keyVaultUrl: keyVault.properties.vaultUri
+          keyVaultUrl: '${keyVault.properties.vaultUri}secrets/appuserpassword'
           identity: userIdentity.id
         }
+        {
+          name: 'sqlconnectionstring'
+          keyVaultUrl: '${keyVault.properties.vaultUri}secrets/sqlconnectionstring'
+          identity: userIdentity.id
+        }        
       ]
     }
     template: {
@@ -91,6 +96,10 @@ resource app 'Microsoft.App/containerApps@2023-04-01-preview' = {
             {
               name: 'AZURE_SQL_PASSWORD'
               secretRef: 'appuserpassword'
+            }
+            {
+              name: 'AZURE_SQL_CONNECTIONSTRING'
+              secretRef: 'sqlconnectionstring'
             }
             {
               name: 'AZURE_OPENAI_ENDPOINT'

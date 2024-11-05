@@ -149,9 +149,9 @@ resource appUserPasswordSecret 'Microsoft.KeyVault/vaults/secrets@2022-07-01' = 
 
 resource sqlAzureConnectionStringSecret 'Microsoft.KeyVault/vaults/secrets@2022-07-01' = {
   parent: keyVault
-  name: connectionStringKey
+  name: 'sqlconnectionstring'
   properties: {
-    value: '${connectionString}; Password=${appUserPassword}'
+    value: '${connectionString}'
   }
 }
 

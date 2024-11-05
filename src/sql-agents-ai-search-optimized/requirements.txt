@@ -19,3 +19,4 @@ azure-monitor-opentelemetry-exporter==1.0.0b31
 azure-monitor-opentelemetry==1.6.2
 openinference-instrumentation-langchain==0.1.29
 azure-search-documents==11.5.2
+ipython==8.26.0

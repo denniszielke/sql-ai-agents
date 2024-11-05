@@ -111,8 +111,6 @@ odbc_str = 'mssql+pyodbc:///?odbc_connect=' \
                 'Driver='+driver+ \
                 ';' + os.getenv("AZURE_SQL_CONNECTIONSTRING")
 
-db = SQLDatabase.from_uri(odbc_str)
-
 from langchain_community.utilities import SQLDatabase
 
 db = SQLDatabase.from_uri(odbc_str)

@@ -52,7 +52,7 @@ echo "get and set the value for AZURE_ENV_NAME"
 source <(azd env get-values | grep AZURE_ENV_NAME)
 
 echo "building and deploying the streamlit user interface"
-bash ./azd-hooks/deploy.sh sql-agents $AZURE_ENV_NAME
+bash ./azd-hooks/deploy.sh sql-react $AZURE_ENV_NAME
 ```
 
 ## Starting up
