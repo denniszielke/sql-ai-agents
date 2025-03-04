@@ -166,16 +166,16 @@ def index_search_tool(query: str) -> List[str]:
         query (str): The input query. This is used to search the vector index.
 
     Returns:
-        List[str]: The resulting list of schema information in the form [TableName:Name;ColumnName:Name;DataType:Type].
+        List[str]: The resulting list of schema information in the form [TableName:Name;ColumnName:Name;DataType:Type;RelevanceScore:Float].
 
     """
 
-    results = search_index.similarity_search(
+    results = search_index.similarity_search_with_relevance_scores(
         query=query,
-        search_type="hybrid",
+        k=20,
+        score_threshold=0.75,
     )
-
-    return [result.page_content for result in results]
+    return [f"{result[0].page_content}RelevanceScore:{result[1]}" for result in results]
 
 def db_schema_tool(fields: List[str]) -> List[Document]:
     """
@@ -228,7 +228,8 @@ def query_compiler(state: State) -> dict[str, list[AIMessage]]:
 
     Given an input, retrieve all required information from your tools to answer the question. 
     Filter the information to only include the necessary columns. Be as short as possible.
-    Use ONLY the tools provided, to extract the information. 
+    Use ONLY the tools provided, to extract the information. Make sure, that you create your queries based on the information you have exacly. 
+    Use only the table names provided.
 
     ---
     Input Data: {input}
